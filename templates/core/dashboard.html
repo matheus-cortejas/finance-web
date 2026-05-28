@@ -129,6 +129,12 @@
                             </a>
                         </div>
                         <div class="text-app-muted small">{{ alert.noticia.publicado_em|default:alert.created_at }} · {{ alert.noticia.impacto }}</div>
+                        {% if alert.noticia.resumo %}
+                            <div class="text-app-muted small mt-1">{{ alert.noticia.resumo }}</div>
+                        {% endif %}
+                        {% if alert.noticia.resumo_status and alert.noticia.resumo_status != "ok" %}
+                            <div class="text-app-muted small mt-1">Resumo: {{ alert.noticia.resumo_status }}{% if alert.noticia.resumo_provider %} · {{ alert.noticia.resumo_provider }}{% endif %}</div>
+                        {% endif %}
                     </div>
                 {% empty %}
                     <div class="list-group-item px-0 bg-transparent">

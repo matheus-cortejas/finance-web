@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 try:
     from openai import OpenAI
 except Exception:  # pragma: no cover - optional dependency
     OpenAI = None
 
-from setup.settings import OPENAI_API_KEY, OPENAI_MAX_TOKENS, OPENAI_MODEL, OPENAI_USE_CONTENT
+from setup.settings import (
+    OPENAI_API_KEY,
+    OPENAI_MAX_TOKENS,
+    OPENAI_MODEL,
+    OPENAI_SUMMARY_MAX_TOKENS,
+    OPENAI_SUMMARY_TEMPERATURE,
+    OPENAI_USE_CONTENT,
+)
 
 
 logger = logging.getLogger("llm.openai_client")
@@ -36,6 +44,19 @@ def _heuristic_relevance(title: str, description: str, content: str, assets: lis
         "matched": matched,
         "reason": "Heuristic fallback: OpenAI unavailable",
     }
+
+
+def _fallback_summary(title: str, description: str, content: str) -> str:
+    text = (description or content or title or "").strip()
+    if not text:
+        return ""
+
+    cleaned = re.sub(r"\s+", " ", text)
+    sentences = re.split(r"(?<=[.!?])\s+", cleaned)
+    summary = " ".join(sentence for sentence in sentences[:2] if sentence).strip()
+    if summary:
+        return summary
+    return cleaned[:280].strip()
 
 
 def judge_article_relevance(title: str, description: str, content: str, assets: list) -> dict:
@@ -117,3 +138,43 @@ def judge_article_relevance(title: str, description: str, content: str, assets: 
         fallback["reason"] = f"Heuristic fallback after OpenAI error: {exc}"
         logger.exception("Erro ao chamar OpenAI; usando fallback heuristico")
         return fallback
+
+
+def summarize_article(title: str, description: str, content: str) -> dict:
+    text = (description or content or title or "").strip()
+    if not text:
+        return {"summary": "", "status": "vazio", "provider": "fallback"}
+
+    if not client or not OPENAI_API_KEY:
+        return {
+            "summary": _fallback_summary(title, description, content),
+            "status": "fallback",
+            "provider": "fallback",
+        }
+
+    system = (
+        "You are a concise assistant. Summarize the article in Portuguese using 2-3 sentences. "
+        "Return only the summary text, no bullet points, no markdown."
+    )
+    user = f"Title: {title}\nDescription: {description}\nContent: {content}\n\nSummary:"
+
+    try:
+        logger.info("Chamando OpenAI para resumo de noticia")
+        response = client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+            temperature=OPENAI_SUMMARY_TEMPERATURE,
+            max_tokens=OPENAI_SUMMARY_MAX_TOKENS,
+        )
+        summary = (response.choices[0].message.content or "").strip()
+        if not summary:
+            summary = _fallback_summary(title, description, content)
+            return {"summary": summary, "status": "fallback", "provider": "fallback"}
+        return {"summary": summary, "status": "ok", "provider": "openai"}
+    except Exception:
+        logger.exception("Erro ao gerar resumo; usando fallback")
+        return {
+            "summary": _fallback_summary(title, description, content),
+            "status": "fallback",
+            "provider": "fallback",
+        }
