@@ -1,38 +1,37 @@
-import sys
+from __future__ import annotations
+
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+from uuid import uuid4
 
-from database.acao_repo import asset_exists, add_to_watchlist, get_watchlist_assets
-from database.connection import init_db
-from services.noticia_service import check_feeds_and_report
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "setup.settings")
 
-def load_feeds(path):
-    path = os.path.expanduser(path)
-    if not os.path.exists(path):
-        return []
-    with open(path, 'r') as f:
-        return [line.strip() for line in f if line.strip()]
+import django
 
-def main():
-    init_db()
-    # try to add PETR4 and ABEV3 to watchlist
-    for code in ('PETR4','ABEV3'):
-        a = asset_exists(code=code)
-        if a:
-            add_to_watchlist(a['id'])
-            print('Added to watchlist:', a['code'], a['name'])
-        else:
-            print('Asset not found:', code)
+django.setup()
 
-    feeds = load_feeds(os.path.expanduser('~/Downloads/rss.txt'))
-    print('Feeds:', feeds)
-    watch = [{'id': a['id'], 'code': a['code'], 'name': a['name']} for a in get_watchlist_assets()]
-    print('Watchlist:', watch)
+from django.test import TestCase
 
-    reports = check_feeds_and_report(feeds, watch, within_days=1)
-    print('Reports found:', len(reports))
-    for r in reports:
-        print(r['published'], r['title'], r['link'], r['matches'])
+from core import data_access
+from core.models import Ativo
 
-if __name__ == '__main__':
-    main()
+
+class WatchlistSmokeTests(TestCase):
+    def setUp(self):
+        self.asset = Ativo.objects.create(
+            ticker=f"TEST{uuid4().hex[:6].upper()}",
+            nome="Ativo de teste",
+            source="b3",
+        )
+
+    def test_asset_exists_by_code_and_name(self):
+        found_by_code = data_access.asset_exists(code=self.asset.ticker)
+        found_by_name = data_access.asset_exists(name=self.asset.nome)
+
+        self.assertEqual(found_by_code["code"], self.asset.ticker)
+        self.assertEqual(found_by_name["name"], self.asset.nome)
+
+    def test_add_to_watchlist_registers_default_carteira(self):
+        data_access.add_to_watchlist(self.asset.id)
+
+        watchlist = data_access.get_watchlist_assets()
+        self.assertTrue(any(asset["id"] == self.asset.id for asset in watchlist))
