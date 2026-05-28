@@ -32,15 +32,24 @@
             <span class="soft-badge">Adicionar ativo</span>
             <h2 class="h3 fw-bold hero-title mt-2">Sua carteira, os alertas e a última varredura em um único lugar.</h2>
             <p class="hero-subtitle">Adicione ativos pelo código ou nome, acompanhe as últimas notícias vinculadas e mantenha o contexto de mercado sempre visível.</p>
-            <form method="post" class="row g-2 mt-3">
+            <form method="post" action="{% url 'dashboard' %}" class="row g-2 mt-3">
             {% csrf_token %}
                 <div class="col-12 col-md-8">
-                    <input class="form-control form-control-lg" type="text" name="asset_term" placeholder="Ex.: PETR4, VALE3, Petrobras, Vale">
+                    <input
+                        id="asset-term-input"
+                        class="form-control form-control-lg"
+                        type="text"
+                        name="asset_term"
+                        placeholder="Ex.: PETR4, VALE3, Petrobras, Vale"
+                        autocomplete="off"
+                        data-suggestions-url="{% url 'asset_suggestions' %}"
+                    >
                 </div>
                 <div class="col-12 col-md-4">
                     <button class="btn btn-primary btn-lg w-100" type="submit">Adicionar ativo</button>
                 </div>
             </form>
+            <div id="asset-suggestions" class="list-group mt-2 d-none"></div>
             {% if asset_matches %}
             <div class="list-group list-group-flush mt-4">
                 {% for asset in asset_matches %}
@@ -87,9 +96,16 @@
             <h2 class="h4 fw-bold">Carteira</h2>
             <div class="list-group list-group-flush mt-3">
             {% for asset in portfolio_assets %}
-                    <div class="list-group-item px-0 bg-transparent">
-                        <div class="fw-bold">{{ asset.ticker }}</div>
-                        <div class="text-app-muted small">{{ asset.nome }}{% if asset.source %} · {{ asset.source }}{% endif %}</div>
+                    <div class="list-group-item px-0 bg-transparent d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+                        <div>
+                            <div class="fw-bold">{{ asset.ticker }}</div>
+                            <div class="text-app-muted small">{{ asset.nome }}{% if asset.source %} · {{ asset.source }}{% endif %}</div>
+                        </div>
+                        <form method="post" action="{% url 'dashboard' %}" class="m-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="remove_asset_id" value="{{ asset.id }}">
+                            <button class="btn btn-sm btn-outline-danger" type="submit">Remover</button>
+                        </form>
                     </div>
                 {% empty %}
                     <div class="list-group-item px-0 bg-transparent">
@@ -124,4 +140,102 @@
                 </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+{{ block.super }}
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+    const input = document.getElementById("asset-term-input");
+    const suggestions = document.getElementById("asset-suggestions");
+
+    if (!input || !suggestions) {
+        return;
+    }
+
+    let requestTimer = null;
+    let activeController = null;
+
+    const hideSuggestions = () => {
+        suggestions.innerHTML = "";
+        suggestions.classList.add("d-none");
+    };
+
+    const showSuggestions = (items) => {
+        if (!items.length) {
+            hideSuggestions();
+            return;
+        }
+
+        suggestions.innerHTML = items.map((item) => `
+            <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center gap-2" data-asset-ticker="${item.ticker}">
+                <span class="fw-semibold">${item.ticker}</span>
+                <span class="text-app-muted small text-end">${item.nome}${item.source ? ` · ${item.source}` : ""}</span>
+            </button>
+        `).join("");
+        suggestions.classList.remove("d-none");
+    };
+
+    const fetchSuggestions = async () => {
+        const term = input.value.trim();
+        if (!term) {
+            hideSuggestions();
+            return;
+        }
+
+        if (activeController) {
+            activeController.abort();
+        }
+
+        activeController = new AbortController();
+        const url = new URL(input.dataset.suggestionsUrl, window.location.origin);
+        url.searchParams.set("q", term);
+
+        try {
+            const response = await fetch(url, {
+                headers: {"X-Requested-With": "XMLHttpRequest"},
+                signal: activeController.signal,
+            });
+
+            if (!response.ok) {
+                hideSuggestions();
+                return;
+            }
+
+            const data = await response.json();
+            showSuggestions(data.results || []);
+        } catch (error) {
+            if (error.name !== "AbortError") {
+                hideSuggestions();
+            }
+        }
+    };
+
+    input.addEventListener("input", () => {
+        window.clearTimeout(requestTimer);
+        requestTimer = window.setTimeout(fetchSuggestions, 180);
+    });
+
+    input.addEventListener("focus", () => {
+        if (suggestions.children.length) {
+            suggestions.classList.remove("d-none");
+        }
+    });
+
+    input.addEventListener("blur", () => {
+        window.setTimeout(hideSuggestions, 150);
+    });
+
+    suggestions.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-asset-ticker]");
+        if (!button) {
+            return;
+        }
+
+        input.value = button.dataset.assetTicker;
+        hideSuggestions();
+        input.focus();
+    });
+});
+</script>
 {% endblock %}

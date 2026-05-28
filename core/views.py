@@ -72,12 +72,54 @@ def _get_or_create_carteira(user) -> Carteira:
     return carteira
 
 
+def _serialize_asset(asset: Ativo) -> dict:
+    return {
+        "id": asset.id,
+        "ticker": asset.ticker,
+        "nome": asset.nome,
+        "source": asset.source,
+    }
+
+
+def _find_asset_suggestions(term: str, limit: int = 8) -> list[Ativo]:
+    term = term.strip()
+    if not term:
+        return []
+
+    return list(
+        Ativo.objects.filter(Q(ticker__istartswith=term) | Q(nome__istartswith=term)).distinct().order_by("ticker")[:limit]
+    )
+
+
+@login_required
+def asset_suggestions(request):
+    term = request.GET.get("q", "").strip()
+    assets = _find_asset_suggestions(term)
+    return JsonResponse({"results": [_serialize_asset(asset) for asset in assets]})
+
+
 @login_required
 def dashboard(request):
     carteira = _get_or_create_carteira(request.user)
     asset_matches = []
 
     if request.method == "POST":
+        remove_asset_id = request.POST.get("remove_asset_id", "").strip()
+        if remove_asset_id:
+            asset = Ativo.objects.filter(pk=remove_asset_id).first()
+            if asset and carteira.ativos.filter(pk=asset.pk).exists():
+                carteira.ativos.remove(asset)
+                logger.info("Ativo removido da carteira: user=%s ticker=%s", request.user.username, asset.ticker)
+                messages.success(request, f"{asset.ticker} removido da sua carteira.")
+            else:
+                logger.warning(
+                    "Tentativa de remover ativo inexistente ou não vinculado: user=%s asset_id=%s",
+                    request.user.username,
+                    remove_asset_id,
+                )
+                messages.warning(request, "O ativo informado não está vinculado à sua carteira.")
+            return redirect("dashboard")
+
         asset_term = request.POST.get("asset_term", "").strip()
         logger.info("Dashboard recebeu busca de ativo: user=%s termo=%s", request.user.username, asset_term or "<vazio>")
         if asset_term:
