@@ -75,70 +75,6 @@ def _should_auto_login_admin(request) -> bool:
     )
 
 
-def _get_chat_history(request) -> list[dict[str, str]]:
-    history = request.session.get(CHAT_SESSION_KEY)
-    if history:
-        normalized = []
-        for item in history:
-            role = item.get("role")
-            content = item.get("content", "").strip()
-            if role in {"user", "assistant"} and content:
-                normalized.append({"role": role, "content": content})
-        if normalized:
-            return normalized[-24:]
-    request.session[CHAT_SESSION_KEY] = [CHAT_WELCOME_MESSAGE]
-    request.session.modified = True
-    return [CHAT_WELCOME_MESSAGE]
-
-
-def _store_chat_history(request, history: list[dict[str, str]]) -> None:
-    request.session[CHAT_SESSION_KEY] = history[-24:]
-    request.session.modified = True
-
-
-def home(request):
-    if _should_auto_login_admin(request):
-        admin_user = _get_or_create_admin_user()
-        auth_login(request, admin_user)
-        logger.info("Admin logado automaticamente no runserver: username=%s", admin_user.username)
-
-    signup_form = UserCreationForm()
-    login_form = AuthenticationForm(request)
-
-    if request.method == "POST":
-        action = request.POST.get("action")
-        if action == "signup":
-            signup_form = UserCreationForm(request.POST)
-            logger.info("Cadastro solicitado pela home: username=%s", signup_form.data.get("username", ""))
-            if signup_form.is_valid():
-                user = signup_form.save()
-                auth_login(request, user)
-                logger.info("Cadastro concluído e usuário autenticado: username=%s", user.username)
-                messages.success(request, "Conta criada com sucesso. Você já pode usar sua dashboard.")
-                return redirect("dashboard")
-            logger.info("Cadastro inválido pela home: username=%s", signup_form.data.get("username", ""))
-        elif action == "login":
-            login_form = AuthenticationForm(request, data=request.POST)
-            logger.info("Login solicitado pela home: username=%s", login_form.data.get("username", ""))
-            if login_form.is_valid():
-                user = login_form.get_user()
-                auth_login(request, user)
-                logger.info("Login concluído pela home: username=%s", user.username)
-                messages.success(request, "Bem-vindo de volta.")
-                return redirect("dashboard")
-            logger.warning("Falha de login pela home: username=%s", login_form.data.get("username", ""))
-            messages.error(request, "Usuário ou senha inválidos.")
-
-    return render(
-        request,
-        "core/home.html",
-        {
-            "signup_form": signup_form,
-            "login_form": login_form,
-        },
-    )
-
-
 def _get_or_create_carteira(user) -> Carteira:
     carteira, _ = Carteira.objects.get_or_create(usuario=user)
     return carteira
@@ -201,40 +137,4 @@ def dashboard(request):
             "recent_alerts": recent_alerts,
             "asset_matches": asset_matches,
         },
-    )
-
-
-@login_required
-def chat(request):
-    chat_history = _get_chat_history(request)
-    return render(
-        request,
-        "core/chat.html",
-        {
-            "chat_history": chat_history,
-            "chat_provider": "OpenAI" if settings.OPENAI_API_KEY else "Fallback local",
-        },
-    )
-
-
-@login_required
-@require_POST
-def chat_api(request):
-    message = request.POST.get("message", "").strip()
-    history = _get_chat_history(request)
-    if not message:
-        return JsonResponse({"error": "Mensagem vazia."}, status=400)
-
-    history.append({"role": "user", "content": message})
-    response = chat_service.generate_chat_reply(history, message)
-    reply = response["reply"]
-    history.append({"role": "assistant", "content": reply})
-    _store_chat_history(request, history)
-
-    return JsonResponse(
-        {
-            "reply": reply,
-            "provider": response.get("provider", "fallback"),
-            "history": history,
-        }
     )
