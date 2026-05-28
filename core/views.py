@@ -18,14 +18,6 @@ from core.services import chat_service
 
 
 logger = logging.getLogger("views")
-CHAT_SESSION_KEY = "monitor_chat_history"
-CHAT_WELCOME_MESSAGE = {
-    "role": "assistant",
-    "content": (
-        "Olá. Eu sou o assistente do Monitor Financeiro. Pergunte sobre a carteira, os alertas,"
-        " o scheduler ou a estrutura do projeto."
-    ),
-}
 
 
 def _is_runserver_context() -> bool:
@@ -138,3 +130,35 @@ def dashboard(request):
             "asset_matches": asset_matches,
         },
     )
+
+
+def home(request):
+    # auto-login quando aplicável
+    if _should_auto_login_admin(request):
+        admin_user = _get_or_create_admin_user()
+        auth_login(request, admin_user)
+        messages.info(request, "Sessão administrativa iniciada automaticamente.")
+
+    # se o usuário já estiver autenticado, renderiza o dashboard (mesmo contexto)
+    if request.user.is_authenticated:
+        carteira = _get_or_create_carteira(request.user)
+        asset_matches = []
+        portfolio_assets = list(carteira.ativos.order_by("ticker"))
+        recent_alerts = list(
+            Alerta.objects.filter(usuario=request.user)
+            .select_related("ativo", "noticia")
+            .order_by("-created_at")[:8]
+        )
+        return render(
+            request,
+            "core/dashboard.html",
+            {
+                "carteira": carteira,
+                "portfolio_assets": portfolio_assets,
+                "recent_alerts": recent_alerts,
+                "asset_matches": asset_matches,
+            },
+        )
+
+    # usuário anônimo: renderiza landing / formulário de cadastro
+    return render(request, "core/home.html", {"show_signup": True})
