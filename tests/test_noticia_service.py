@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import os
-import sys
 import unittest
 from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "setup.settings")
 
-from llm import openai_client
-from services import noticia_service
+import django
+
+django.setup()
+
+from core.llm import openai_client
+from core.services import noticia_service
 
 
 class NoticiaServiceTests(unittest.TestCase):

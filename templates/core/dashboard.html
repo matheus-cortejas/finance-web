@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | Monitor Financeiro{% endblock %}
+
+{% block body %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4 fade-in">
+    <div>
+        <span class="soft-badge">Dashboard operacional</span>
+        <h1 class="h2 fw-bold hero-title mb-0 mt-2">Monitor Financeiro</h1>
+        <p class="hero-subtitle mb-0">Carteira, alertas e scheduler em uma visão única.</p>
+    </div>
+    <div class="d-flex flex-wrap align-items-center gap-2">
+        <span class="badge text-bg-light border px-3 py-2">{{ request.user.username }}</span>
+        <a class="btn btn-outline-secondary" href="{% url 'home' %}">Home</a>
+        <a class="btn btn-outline-primary" href="{% url 'chat' %}">Chat</a>
+        <form method="post" action="{% url 'logout' %}" class="d-inline">
+            {% csrf_token %}
+            <button class="btn btn-outline-danger" type="submit">Sair</button>
+        </form>
+    </div>
+</div>
+
+{% if messages %}
+<div class="mb-4">
+    {% for message in messages %}
+        <div class="alert alert-info shadow-sm fade-in mb-2" role="alert">{{ message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="row g-4 fade-in">
+    <div class="col-lg-8">
+        <div class="glass surface p-4 p-lg-5 h-100">
+            <span class="soft-badge">Adicionar ativo</span>
+            <h2 class="h3 fw-bold hero-title mt-2">Sua carteira, os alertas e a última varredura em um único lugar.</h2>
+            <p class="hero-subtitle">Adicione ativos pelo código ou nome, acompanhe as últimas notícias vinculadas e mantenha o contexto de mercado sempre visível.</p>
+            <form method="post" class="row g-2 mt-3">
+            {% csrf_token %}
+                <div class="col-12 col-md-8">
+                    <input class="form-control form-control-lg" type="text" name="asset_term" placeholder="Ex.: PETR4, VALE3, Petrobras, Vale">
+                </div>
+                <div class="col-12 col-md-4">
+                    <button class="btn btn-primary btn-lg w-100" type="submit">Adicionar ativo</button>
+                </div>
+            </form>
+            {% if asset_matches %}
+            <div class="list-group list-group-flush mt-4">
+                {% for asset in asset_matches %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="fw-bold">{{ asset.ticker }} · {{ asset.nome }}</div>
+                        <div class="text-app-muted small">{{ asset.source|default:"carteira" }}</div>
+                    </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="glass surface p-4 h-100">
+            <h2 class="h4 fw-bold">Resumo</h2>
+            <div class="row g-3 mt-1">
+                <div class="col-12">
+                    <div class="p-3 rounded-4 bg-white border">
+                        <div class="display-6 fw-bold mb-0">{{ portfolio_assets|length }}</div>
+                        <div class="text-app-muted small">ativo(s) na carteira</div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="p-3 rounded-4 bg-white border">
+                        <div class="display-6 fw-bold mb-0">{{ recent_alerts|length }}</div>
+                        <div class="text-app-muted small">alerta(s) recentes</div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="p-3 rounded-4 bg-white border">
+                        <div class="h5 fw-bold mb-0">{{ carteira.usuario.username }}</div>
+                        <div class="text-app-muted small">carteira conectada ao usuário</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-1">
+    <div class="col-lg-7">
+        <div class="glass surface p-4 h-100 fade-in">
+            <h2 class="h4 fw-bold">Carteira</h2>
+            <div class="list-group list-group-flush mt-3">
+            {% for asset in portfolio_assets %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="fw-bold">{{ asset.ticker }}</div>
+                        <div class="text-app-muted small">{{ asset.nome }}{% if asset.source %} · {{ asset.source }}{% endif %}</div>
+                    </div>
+                {% empty %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="fw-bold">Nenhum ativo vinculado ainda</div>
+                        <div class="text-app-muted small">Use o campo acima para procurar um ativo e adicioná-lo à carteira.</div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="glass surface p-4 h-100 fade-in">
+            <h2 class="h4 fw-bold">Últimos alertas</h2>
+            <div class="list-group list-group-flush mt-3">
+                {% for alert in recent_alerts %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="fw-bold">
+                            <a href="{{ alert.noticia.link }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset">
+                                {{ alert.ativo.ticker }} · {{ alert.noticia.titulo|default:alert.noticia.link }}
+                            </a>
+                        </div>
+                        <div class="text-app-muted small">{{ alert.noticia.publicado_em|default:alert.created_at }} · {{ alert.noticia.impacto }}</div>
+                    </div>
+                {% empty %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="fw-bold">Sem alertas ainda</div>
+                        <div class="text-app-muted small">Quando o scheduler detectar notícias relevantes, elas aparecem aqui.</div>
+                    </div>
+                {% endfor %}
+            </div>
+                </div>
+    </div>
+</div>
+{% endblock %}

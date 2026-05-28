@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import os
-import sys
 import time
 import types
 import unittest
+import sys
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
-
-from parsers.rss_parser import RSSParser
+from core.parsers.rss_parser import RSSParser
 
 
 class FakeEntry(dict):

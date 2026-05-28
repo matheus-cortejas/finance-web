@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Home | Monitor Financeiro{% endblock %}
+
+{% block body %}
+{% if messages %}
+<div class="mb-4">
+    {% for message in messages %}
+        <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags|default:'info' }}{% endif %} shadow-sm mb-2" role="alert">{{ message }}</div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="row g-4 align-items-stretch fade-in">
+    <div class="col-lg-6">
+        <div class="glass surface p-4 p-lg-5 h-100">
+            <span class="soft-badge">Monitor Financeiro</span>
+            {% if request.user.is_authenticated %}
+                <h1 class="display-5 fw-bold hero-title mt-3">Olá, {{ request.user.username }}. O monitor já abriu com sessão administrativa.</h1>
+                <p class="lead hero-subtitle mt-3">Use os atalhos abaixo para entrar na dashboard, abrir o chatbot ou continuar acompanhando os alertas sem passar pela tela de login.</p>
+
+                <div class="d-flex flex-wrap gap-2 mt-4">
+                    <a class="btn btn-primary btn-lg" href="{% url 'dashboard' %}">Ir para dashboard</a>
+                    <a class="btn btn-outline-primary btn-lg" href="{% url 'chat' %}">Abrir chatbot</a>
+                </div>
+            {% else %}
+                <h1 class="display-5 fw-bold hero-title mt-3">Crie sua conta na home e acompanhe ativos sem sair do navegador.</h1>
+                <p class="lead hero-subtitle mt-3">A dashboard, o login e o cadastro agora estão integrados ao Django. O acesso manual continua disponível pela URL de autenticação, mas a home foca no cadastro.</p>
+
+                <div class="d-flex flex-wrap gap-2 mt-4">
+                    <a class="btn btn-primary btn-lg" href="#signup">Criar conta</a>
+                    <a class="btn btn-outline-secondary btn-lg" href="{% url 'dashboard' %}">Ir para dashboard</a>
+                </div>
+            {% endif %}
+
+            <div class="row g-3 mt-4">
+                <div class="col-sm-4">
+                    <div class="p-3 rounded-4 bg-white border h-100">
+                        <div class="h5 mb-1 fw-bold">Auth</div>
+                        <div class="text-app-muted small">Sessão administrativa automática no runserver.</div>
+                    </div>
+                </div>
+                <div class="col-sm-4">
+                    <div class="p-3 rounded-4 bg-white border h-100">
+                        <div class="h5 mb-1 fw-bold">ORM</div>
+                        <div class="text-app-muted small">Carteira e alertas persistidos no banco.</div>
+                    </div>
+                </div>
+                <div class="col-sm-4">
+                    <div class="p-3 rounded-4 bg-white border h-100">
+                        <div class="h5 mb-1 fw-bold">Chat</div>
+                        <div class="text-app-muted small">Interface estilo LLM com resposta por sessão.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        {% if request.user.is_authenticated %}
+            <div class="glass surface p-4 p-lg-5 h-100 d-flex flex-column justify-content-between">
+                <div>
+                    <span class="soft-badge">Sessão ativa</span>
+                    <h2 class="h3 fw-bold hero-title mt-2 mb-3">Administração sem fricção, acesso oculto e atalhos rápidos.</h2>
+                    <p class="hero-subtitle">Você já entrou como administrador. A tela de login continua disponível pela URL padrão, mas não aparece na navegação.</p>
+                </div>
+                <div class="row g-3 mt-2">
+                    <div class="col-12">
+                        <div class="p-3 rounded-4 bg-white border">
+                            <div class="fw-bold">Dashboard</div>
+                            <div class="text-app-muted small">Carteira, alertas e notícias em uma única visão.</div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="p-3 rounded-4 bg-white border">
+                            <div class="fw-bold">Chatbot</div>
+                            <div class="text-app-muted small">Interface no estilo LLM para dúvidas sobre o projeto.</div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <a class="btn btn-outline-secondary btn-lg w-100" href="{% url 'chat' %}">Abrir assistente</a>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="glass surface p-4 h-100" id="signup">
+                <span class="soft-badge">Novo usuário</span>
+                <h2 class="h4 fw-bold mt-2">Criar conta</h2>
+                <p class="text-app-muted small">Abra uma conta e já entre autenticado.</p>
+
+                {% if signup_form.errors %}
+                    <div class="alert alert-danger" role="alert">Corrija os campos do cadastro e tente novamente.</div>
+                {% endif %}
+
+                <form method="post" class="mt-3">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="signup">
+                    <div class="mb-3">
+                        <label class="form-label" for="id_signup_username">Usuário</label>
+                                <input class="form-control form-control-lg {% if signup_form.username.errors %}is-invalid{% endif %}" type="text" id="id_signup_username" name="username" value="{{ signup_form.username.value|default:'' }}" autocomplete="username">
+                                {% for error in signup_form.username.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="id_signup_password1">Senha</label>
+                                <input class="form-control form-control-lg {% if signup_form.password1.errors %}is-invalid{% endif %}" type="password" id="id_signup_password1" name="password1" autocomplete="new-password">
+                                {% for error in signup_form.password1.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="id_signup_password2">Confirmar senha</label>
+                                <input class="form-control form-control-lg {% if signup_form.password2.errors %}is-invalid{% endif %}" type="password" id="id_signup_password2" name="password2" autocomplete="new-password">
+                                {% for error in signup_form.password2.errors %}
+                                    <div class="invalid-feedback d-block">{{ error }}</div>
+                                {% endfor %}
+                    </div>
+                            {% if signup_form.non_field_errors %}
+                                <div class="alert alert-danger py-2" role="alert">
+                                    {% for error in signup_form.non_field_errors %}
+                                        <div>{{ error }}</div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                    <button class="btn btn-primary btn-lg w-100" type="submit">Cadastrar e entrar</button>
+                </form>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

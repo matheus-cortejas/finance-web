@@ -5,9 +5,13 @@ import sys
 import unittest
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "setup.settings")
 
-from scheduler import jobs
+import django
+
+django.setup()
+
+from core.scheduler import jobs
 
 
 class SchedulerJobsTests(unittest.TestCase):
