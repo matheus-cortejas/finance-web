@@ -1,1 +1,0 @@
-from services.acao_service import fetch_sp500_and_store, parse_b3_csv
