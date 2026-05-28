@@ -1,0 +1,1 @@
+from services.noticia_service import check_feeds_and_report
