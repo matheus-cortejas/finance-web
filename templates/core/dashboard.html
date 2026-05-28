@@ -64,27 +64,80 @@
     </div>
 
     <div class="col-lg-4">
-        <div class="glass surface p-4 h-100">
-            <h2 class="h4 fw-bold">Resumo</h2>
-            <div class="row g-3 mt-1">
-                <div class="col-12">
-                    <div class="p-3 rounded-4 bg-white border">
-                        <div class="display-6 fw-bold mb-0">{{ portfolio_assets|length }}</div>
-                        <div class="text-app-muted small">ativo(s) na carteira</div>
+        <div class="d-flex flex-column gap-3 h-100">
+            <div class="glass surface p-4">
+                <h2 class="h4 fw-bold">Resumo</h2>
+                <div class="row g-3 mt-1">
+                    <div class="col-12">
+                        <div class="p-3 rounded-4 bg-white border">
+                            <div class="display-6 fw-bold mb-0">{{ portfolio_assets|length }}</div>
+                            <div class="text-app-muted small">ativo(s) na carteira</div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="p-3 rounded-4 bg-white border">
+                            <div class="display-6 fw-bold mb-0">{{ recent_alerts|length }}</div>
+                            <div class="text-app-muted small">alerta(s) recentes</div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="p-3 rounded-4 bg-white border">
+                            <div class="h5 fw-bold mb-0">{{ carteira.usuario.username }}</div>
+                            <div class="text-app-muted small">carteira conectada ao usuario</div>
+                        </div>
                     </div>
                 </div>
-                <div class="col-12">
-                    <div class="p-3 rounded-4 bg-white border">
-                        <div class="display-6 fw-bold mb-0">{{ recent_alerts|length }}</div>
-                        <div class="text-app-muted small">alerta(s) recentes</div>
+            </div>
+
+            <div class="glass surface p-4">
+                <h2 class="h5 fw-bold">Perfil do usuario</h2>
+                <p class="text-app-muted small mb-2">Ajuste o perfil e os limites de alerta.</p>
+                <form method="post" action="{% url 'dashboard' %}" class="row g-2">
+                    {% csrf_token %}
+                    <input type="hidden" name="update_profile" value="1">
+                    {% if perfil_form.non_field_errors %}
+                        <div class="text-danger small">{{ perfil_form.non_field_errors|striptags }}</div>
+                    {% endif %}
+                    <div class="col-12">
+                        <label class="form-label small text-app-muted">Perfil de risco</label>
+                        {{ perfil_form.perfil_risco }}
+                        {% if perfil_form.perfil_risco.errors %}
+                            <div class="text-danger small">{{ perfil_form.perfil_risco.errors|striptags }}</div>
+                        {% endif %}
                     </div>
-                </div>
-                <div class="col-12">
-                    <div class="p-3 rounded-4 bg-white border">
-                        <div class="h5 fw-bold mb-0">{{ carteira.usuario.username }}</div>
-                        <div class="text-app-muted small">carteira conectada ao usuário</div>
+                    <div class="col-12">
+                        <label class="form-label small text-app-muted">Horizonte</label>
+                        {{ perfil_form.horizonte }}
                     </div>
-                </div>
+                    <div class="col-12">
+                        <label class="form-label small text-app-muted">Frequencia de alertas</label>
+                        {{ perfil_form.frequencia_alertas }}
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-app-muted">Prioridade minima</label>
+                        {{ perfil_form.alerta_min_prioridade }}
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-app-muted">Sensibilidade a negativo (0 a 1)</label>
+                        {{ perfil_form.sensibilidade_negativo }}
+                        {% if perfil_form.sensibilidade_negativo.errors %}
+                            <div class="text-danger small">{{ perfil_form.sensibilidade_negativo.errors|striptags }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small text-app-muted">Setores preferidos</label>
+                        {{ perfil_form.setores_preferidos_text }}
+                        {% if perfil_form.setores_preferidos_text.errors %}
+                            <div class="text-danger small">{{ perfil_form.setores_preferidos_text.errors|striptags }}</div>
+                        {% endif %}
+                        {% if perfil_form.setores_preferidos_text.help_text %}
+                            <div class="text-app-muted small">{{ perfil_form.setores_preferidos_text.help_text }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-outline-primary w-100" type="submit">Salvar perfil</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -122,19 +175,34 @@
             <h2 class="h4 fw-bold">Últimos alertas</h2>
             <div class="list-group list-group-flush mt-3">
                 {% for alert in recent_alerts %}
-                    <div class="list-group-item px-0 bg-transparent">
+                    <div class="list-group-item px-0 bg-transparent" data-noticia-id="{{ alert.noticia.id }}">
                         <div class="fw-bold">
-                            <a href="{{ alert.noticia.link }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset">
+                            <a href="{{ alert.noticia.link }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset" data-interaction-open data-noticia-id="{{ alert.noticia.id }}">
                                 {{ alert.ativo.ticker }} · {{ alert.noticia.titulo|default:alert.noticia.link }}
                             </a>
                         </div>
                         <div class="text-app-muted small">{{ alert.noticia.publicado_em|default:alert.created_at }} · {{ alert.noticia.impacto }}</div>
+                        <div class="d-flex flex-wrap gap-2 mt-1">
+                            {% if alert.score_for_user %}
+                                <span class="badge {{ alert.score_for_user.badge_class }}">{{ alert.score_for_user.priority_label }}</span>
+                                <span class="badge text-bg-light border">Score {{ alert.score_for_user.score_final }}</span>
+                            {% endif %}
+                            {% if alert.noticia.classificacao %}
+                                <span class="badge text-bg-light border">Impacto {{ alert.noticia.classificacao.impacto }}</span>
+                                <span class="badge text-bg-light border">Sentimento {{ alert.noticia.classificacao.sentimento }}</span>
+                            {% endif %}
+                        </div>
                         {% if alert.noticia.resumo %}
                             <div class="text-app-muted small mt-1">{{ alert.noticia.resumo }}</div>
                         {% endif %}
                         {% if alert.noticia.resumo_status and alert.noticia.resumo_status != "ok" %}
                             <div class="text-app-muted small mt-1">Resumo: {{ alert.noticia.resumo_status }}{% if alert.noticia.resumo_provider %} · {{ alert.noticia.resumo_provider }}{% endif %}</div>
                         {% endif %}
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" data-interaction-action="ignorar" data-noticia-id="{{ alert.noticia.id }}">
+                                Ignorar
+                            </button>
+                        </div>
                     </div>
                 {% empty %}
                     <div class="list-group-item px-0 bg-transparent">
@@ -144,6 +212,77 @@
                 {% endfor %}
             </div>
                 </div>
+    </div>
+</div>
+
+<div class="row g-4 mt-1">
+    <div class="col-12">
+        <div class="glass surface p-4 fade-in">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                <div>
+                    <h2 class="h4 fw-bold">Ranking inteligente</h2>
+                    <p class="text-app-muted small mb-0">Noticias priorizadas por impacto, sentimento e perfil.</p>
+                </div>
+                <form method="get" action="{% url 'dashboard' %}" class="d-flex flex-wrap gap-2">
+                    <select name="priority" class="form-select form-select-sm" aria-label="Filtrar prioridade">
+                        <option value="">Todas as prioridades</option>
+                        {% for option in priority_options %}
+                            <option value="{{ option }}" {% if option == priority_filter %}selected{% endif %}>{{ option|capfirst }}</option>
+                        {% endfor %}
+                    </select>
+                    <select name="sector" class="form-select form-select-sm" aria-label="Filtrar setor">
+                        <option value="">Todos os setores</option>
+                        {% for option in sector_options %}
+                            <option value="{{ option }}" {% if option == sector_filter %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                    <button class="btn btn-outline-primary btn-sm" type="submit">Filtrar</button>
+                    <a class="btn btn-outline-secondary btn-sm" href="{% url 'dashboard' %}">Limpar</a>
+                </form>
+            </div>
+            <div class="list-group list-group-flush mt-3">
+                {% for item in ranked_news %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                            <div>
+                                <div class="fw-bold">
+                                    <a href="{{ item.link }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none text-reset" data-interaction-open data-noticia-id="{{ item.noticia_id }}">
+                                        {{ item.titulo }}
+                                    </a>
+                                </div>
+                                <div class="text-app-muted small">
+                                    {{ item.publicado_em }}{% if item.setor %} · {{ item.setor }}{% endif %}
+                                </div>
+                            </div>
+                            <div class="text-end">
+                                <div class="badge {{ item.prioridade_class }}">{{ item.prioridade_label }}</div>
+                                <div class="small text-app-muted mt-1">Score {{ item.score_final }}</div>
+                            </div>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 mt-2">
+                            {% if item.sentimento %}
+                                <span class="badge {{ item.sentimento_class }}">{{ item.sentimento|capfirst }}</span>
+                            {% endif %}
+                            {% if item.impacto %}
+                                <span class="badge text-bg-light border">Impacto {{ item.impacto }}</span>
+                            {% endif %}
+                            {% if item.urgencia %}
+                                <span class="badge text-bg-light border">Urgencia {{ item.urgencia }}</span>
+                            {% endif %}
+                            <span class="badge text-bg-light border" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ item.motivos_text }}">Motivos</span>
+                        </div>
+                        {% if item.resumo %}
+                            <div class="text-app-muted small mt-2">{{ item.resumo }}</div>
+                        {% endif %}
+                    </div>
+                {% empty %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="fw-bold">Ranking indisponivel</div>
+                        <div class="text-app-muted small">Ative o motor de prioridade para gerar scores por usuario.</div>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -241,6 +380,63 @@ document.addEventListener("DOMContentLoaded", () => {
         input.value = button.dataset.assetTicker;
         hideSuggestions();
         input.focus();
+    });
+
+    const interactionUrl = "{% url 'record_interaction' %}";
+    const getCookie = (name) => {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) {
+            return parts.pop().split(";").shift();
+        }
+        return "";
+    };
+
+    const csrfToken = getCookie("csrftoken");
+    const sendInteraction = async (noticiaId, acao) => {
+        if (!noticiaId || !acao) {
+            return;
+        }
+        const payload = new URLSearchParams({
+            noticia_id: noticiaId,
+            acao,
+            origem: "dashboard",
+        });
+
+        try {
+            await fetch(interactionUrl, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "X-CSRFToken": csrfToken,
+                },
+                body: payload,
+            });
+        } catch (error) {
+            console.warn("Falha ao registrar interacao", error);
+        }
+    };
+
+    document.querySelectorAll("[data-interaction-open]").forEach((link) => {
+        link.addEventListener("click", () => {
+            sendInteraction(link.dataset.noticiaId, "abriu");
+        });
+    });
+
+    document.querySelectorAll("[data-interaction-action]").forEach((button) => {
+        button.addEventListener("click", async (event) => {
+            event.preventDefault();
+            const noticiaId = button.dataset.noticiaId;
+            const action = button.dataset.interactionAction;
+            await sendInteraction(noticiaId, action);
+            button.textContent = "Ignorado";
+            button.disabled = true;
+        });
+    });
+
+    const tooltipTriggers = Array.from(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggers.forEach((trigger) => {
+        new bootstrap.Tooltip(trigger);
     });
 });
 </script>

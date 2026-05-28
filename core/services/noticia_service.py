@@ -9,10 +9,20 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.conf import settings
 
-from core.models import Alerta, Ativo, Carteira, Noticia
+from core.models import (
+    Alerta,
+    Ativo,
+    Carteira,
+    FonteRSS,
+    Noticia,
+    NoticiaClassificacao,
+    NoticiaScore,
+    PerfilInvestidor,
+)
 from core.llm.relevance import is_relevant
-from core.llm.openai_client import summarize_article
+from core.llm.openai_client import classify_article, summarize_article
 from core.parsers.factory import create_parser
+from core.services.scoring_service import calculate_relevance_score, is_priority_at_least
 
 
 logger = logging.getLogger("services.noticia_service")
@@ -195,6 +205,140 @@ def _ensure_article_summary(article_id: int, title: str, description: str, conte
     article.save(update_fields=["resumo", "resumo_status", "resumo_provider", "resumo_em"])
 
 
+def _ensure_article_classification(
+    article_id: int,
+    title: str,
+    description: str,
+    content: str,
+    assets: list | None = None,
+) -> NoticiaClassificacao | None:
+    return _ensure_article_classification_force(
+        article_id,
+        title,
+        description,
+        content,
+        assets=assets,
+        force=False,
+    )
+
+
+def _ensure_article_classification_force(
+    article_id: int,
+    title: str,
+    description: str,
+    content: str,
+    assets: list | None = None,
+    force: bool = False,
+) -> NoticiaClassificacao | None:
+    if not settings.ENABLE_STRUCTURED_CLASSIFICATION and not force:
+        return None
+
+    article = Noticia.objects.filter(id=article_id).first()
+    if not article:
+        return None
+
+    existing = NoticiaClassificacao.objects.filter(noticia=article).first()
+    if existing:
+        return existing
+
+    classification = classify_article(title, description, content, assets or [])
+    classificacao, _ = NoticiaClassificacao.objects.update_or_create(
+        noticia=article,
+        defaults={
+            "sentimento": classification.get("sentimento", "neutro"),
+            "impacto": classification.get("impacto", "medio"),
+            "urgencia": classification.get("urgencia", "media"),
+            "setor": classification.get("setor", ""),
+            "tipo_evento": classification.get("tipo_evento", "outro"),
+            "tickers_relacionados": classification.get("tickers_relacionados", []),
+            "relevancia_llm": classification.get("relevancia_llm", 0.0),
+            "provider": classification.get("provider", ""),
+            "status": classification.get("status", "ok"),
+        },
+    )
+    return classificacao
+
+
+def _get_fonte_confiabilidade(feed_url: str | None) -> float | None:
+    if not feed_url:
+        return None
+    fonte = FonteRSS.objects.filter(url__iexact=feed_url).first()
+    if not fonte:
+        return None
+    return fonte.confiabilidade
+
+
+def _score_and_alert_users(
+    article: Noticia,
+    matched_asset_ids: list[int],
+    classification: NoticiaClassificacao | None,
+    feed_url: str | None,
+) -> None:
+    if not matched_asset_ids or not classification:
+        return
+
+    asset_id_set = set(matched_asset_ids)
+    carteiras = (
+        Carteira.objects.filter(ativos__in=matched_asset_ids)
+        .select_related("usuario")
+        .prefetch_related("ativos")
+        .distinct()
+    )
+    if not carteiras:
+        return
+
+    perfis = {
+        perfil.usuario_id: perfil
+        for perfil in PerfilInvestidor.objects.filter(usuario__in=[carteira.usuario for carteira in carteiras])
+    }
+    fonte_confiabilidade = _get_fonte_confiabilidade(feed_url)
+
+    for carteira in carteiras:
+        usuario = carteira.usuario
+        perfil = perfis.get(usuario.id)
+        carteira_assets = [asset for asset in carteira.ativos.all() if asset.id in asset_id_set]
+        carteira_tickers = [asset.ticker for asset in carteira_assets]
+
+        score_data = calculate_relevance_score(
+            classification,
+            perfil=perfil,
+            carteira_tickers=carteira_tickers,
+            fonte_confiabilidade=fonte_confiabilidade,
+        )
+        NoticiaScore.objects.update_or_create(
+            noticia=article,
+            usuario=usuario,
+            defaults={
+                "score_final": score_data["score_final"],
+                "prioridade": score_data["prioridade"],
+                "motivos": score_data["motivos"],
+            },
+        )
+        logger.info(
+            "Score calculado: noticia_id=%s usuario_id=%s prioridade=%s score=%s",
+            article.id,
+            usuario.id,
+            score_data["prioridade"],
+            score_data["score_final"],
+        )
+
+        min_priority = settings.ALERT_MIN_PRIORITY
+        if perfil and getattr(perfil, "alerta_min_prioridade", None):
+            min_priority = perfil.alerta_min_prioridade
+
+        if not is_priority_at_least(score_data["prioridade"], min_priority):
+            continue
+
+        for asset in carteira_assets:
+            Alerta.objects.get_or_create(usuario=usuario, noticia=article, ativo=asset)
+            logger.info(
+                "Alerta criado por prioridade: noticia_id=%s usuario_id=%s ativo_id=%s",
+                article.id,
+                usuario.id,
+                asset.id,
+            )
+
+
 def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
     watch_terms = {asset["code"]: {"name": asset.get("name", ""), "id": asset.get("id")} for asset in watch_assets}
     cutoff = None
@@ -288,13 +432,32 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
                 continue
 
             _ensure_article_summary(article_id, title, description, content)
-
-            for code in set(matched_codes):
-                asset_id = watch_terms[code].get("id")
-                if asset_id is None:
-                    continue
-                link_article_match(article_id, asset_id)
-                logger.info("Alerta persistido: title=%s codigo=%s asset_id=%s", title, code, asset_id)
+            matched_asset_ids = [
+                watch_terms[code].get("id")
+                for code in matched_codes
+                if watch_terms[code].get("id") is not None
+            ]
+            classification = None
+            if settings.ENABLE_PRIORITY_ENGINE:
+                classification = _ensure_article_classification_force(
+                    article_id,
+                    title,
+                    description,
+                    content,
+                    assets=assets_for_llm,
+                    force=True,
+                )
+                article = Noticia.objects.filter(id=article_id).first()
+                if article:
+                    _score_and_alert_users(article, matched_asset_ids, classification, feed_url)
+            else:
+                _ensure_article_classification(article_id, title, description, content, assets_for_llm)
+                for code in set(matched_codes):
+                    asset_id = watch_terms[code].get("id")
+                    if asset_id is None:
+                        continue
+                    link_article_match(article_id, asset_id)
+                    logger.info("Alerta persistido: title=%s codigo=%s asset_id=%s", title, code, asset_id)
 
             reports.append(
                 {
