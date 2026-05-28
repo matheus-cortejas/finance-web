@@ -69,6 +69,34 @@ class WebViewsTests(TestCase):
         carteira = Carteira.objects.get(usuario=self.user)
         self.assertTrue(carteira.ativos.filter(ticker="PETR4").exists())
 
+    def test_asset_suggestions_returns_prefix_matches(self):
+        Ativo.objects.create(ticker="PETZ3", nome="Petz", source="b3")
+        Ativo.objects.create(ticker="PEAB3", nome="Peabirus", source="b3")
+        Ativo.objects.create(ticker="VALE3", nome="Vale S.A.", source="b3")
+
+        self.client.login(username=self.username, password="secret")
+        response = self.client.get(reverse("asset_suggestions"), {"q": "pe"})
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        tickers = [item["ticker"] for item in payload["results"]]
+        self.assertIn("PEAB3", tickers)
+        self.assertIn("PETR4", tickers)
+        self.assertIn("PETZ3", tickers)
+        self.assertNotIn("VALE3", tickers)
+
+    def test_dashboard_removes_asset_from_carteira(self):
+        carteira, _ = Carteira.objects.get_or_create(usuario=self.user)
+        carteira.ativos.add(self.asset)
+
+        self.client.login(username=self.username, password="secret")
+        response = self.client.post(reverse("dashboard"), {"remove_asset_id": str(self.asset.id)}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        carteira.refresh_from_db()
+        self.assertFalse(carteira.ativos.filter(ticker="PETR4").exists())
+        self.assertContains(response, "PETR4 removido da sua carteira.")
+
     def test_dashboard_logout_uses_post_and_redirects_to_login(self):
         self.client.login(username=self.username, password="secret")
         response = self.client.post(reverse("logout"), follow=True)
