@@ -34,11 +34,11 @@ Se a ideia for entender o projeto por fluxo, esta é a ordem mais útil:
 ### Fluxo em tempo de execução
 
 - O servidor sobe e, se habilitado, dispara o monitor em background.
-- A home pode subir já autenticada como administrador em desenvolvimento, e o login nativo permanece disponível apenas pela URL padrão.
+- A home redireciona para login quando o usuario nao esta autenticado e para o dashboard quando ja existe sessao.
 - O monitor faz a primeira varredura, monta a base de ativos e prepara o scheduler.
 - O scheduler repete a coleta a cada intervalo configurado e limpa notícias antigas diariamente.
-- Quando um feed traz uma notícia relacionada a um ativo da carteira, o sistema persiste a notícia, registra o alerta e abre a notícia em nova guia na dashboard.
-- O usuário entra pela home, cria conta ou autentica e passa a usar a carteira, os alertas e o chatbot diretamente pela interface web.
+- Quando um feed traz uma noticia relacionada a um ativo da carteira, o sistema persiste a noticia, gera o resumo, registra o alerta e abre a noticia em nova guia na dashboard.
+- O usuário entra pela home, autentica e passa a usar a carteira e os alertas diretamente pela interface web.
 
 ### Papel de cada camada
 
@@ -49,7 +49,6 @@ Se a ideia for entender o projeto por fluxo, esta é a ordem mais útil:
 - **Classificação semântica**: [core/llm/](core/llm/).
 - **Automação**: [core/scheduler/](core/scheduler/).
 - **Interface web**: [core/views.py](core/views.py) e `templates/`.
-- **Chatbot**: [core/services/chat_service.py](core/services/chat_service.py) e `templates/core/chat.html`.
 - **Operação**: [core/management/commands/](core/management/commands/) e [logs/monitor.log](logs/monitor.log).
 
 ### Compatibilidade e legado

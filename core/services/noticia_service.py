@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import html
+import json
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+from django.conf import settings
 
 from core.models import Alerta, Ativo, Carteira, Noticia
 from core.llm.relevance import is_relevant
+from core.llm.openai_client import summarize_article
 from core.parsers.factory import create_parser
 
 
@@ -19,6 +25,78 @@ def _parse_date(entry) -> datetime:
     return datetime.now(timezone.utc)
 
 
+_TAG_RE = re.compile(r"<[^>]+>")
+_CODE_LETTERS_RE = re.compile(r"\d+")
+_TRACKING_PARAMS = {
+    "fbclid",
+    "gclid",
+    "igshid",
+    "mc_cid",
+    "mc_eid",
+    "mkt_tok",
+    "utm_campaign",
+    "utm_content",
+    "utm_medium",
+    "utm_source",
+    "utm_term",
+}
+
+
+def _normalize_text(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = html.unescape(text)
+    cleaned = _TAG_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return cleaned.strip()
+
+
+def _truncate_text(text: str, limit: int) -> str:
+    if not text or limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    trimmed = text[:limit].rsplit(" ", 1)[0]
+    return trimmed if trimmed else text[:limit]
+
+
+def _normalize_link(link: str) -> str:
+    if not link:
+        return ""
+    try:
+        parts = urlsplit(link)
+    except Exception:
+        return link
+    if not parts.scheme or not parts.netloc:
+        return link
+    query_items = [
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if key.lower() not in _TRACKING_PARAMS
+    ]
+    query = urlencode(query_items, doseq=True)
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, query, ""))
+
+
+def _safe_raw_data(raw_entry) -> dict | None:
+    if raw_entry is None:
+        return None
+    try:
+        json.dumps(raw_entry)
+        return raw_entry
+    except TypeError:
+        return json.loads(json.dumps(raw_entry, default=str))
+
+
+def _code_aliases(code: str) -> list[str]:
+    if not code:
+        return []
+    letters_only = _CODE_LETTERS_RE.sub("", code).strip()
+    if len(letters_only) >= 4 and letters_only.upper() != code.upper():
+        return [letters_only]
+    return []
+
+
 def _find_matches_in_text(text: str, watch_terms: dict) -> list[tuple[str, str]]:
     text_lower = text.lower()
     matches = []
@@ -29,6 +107,11 @@ def _find_matches_in_text(text: str, watch_terms: dict) -> list[tuple[str, str]]
             continue
         if name and name.lower() in text_lower:
             matches.append((code, name))
+            continue
+        for alias in _code_aliases(code):
+            if re.search(r"\b" + re.escape(alias.lower()) + r"\b", text_lower):
+                matches.append((code, name))
+                break
     return matches
 
 
@@ -48,7 +131,7 @@ def seen_article(link: str) -> bool:
     return Noticia.objects.filter(link=link).exists()
 
 
-def mark_article_seen(link: str, published_ts: int | None = None) -> None:
+def mark_article_seen(link: str, published_ts: int | None = None, raw_data: dict | None = None) -> None:
     published_at = datetime.fromtimestamp(published_ts, tz=timezone.utc) if published_ts is not None else None
     Noticia.objects.get_or_create(
         link=link,
@@ -58,6 +141,7 @@ def mark_article_seen(link: str, published_ts: int | None = None) -> None:
             "publicado_em": published_at,
             "feed_url": "",
             "impacto": "pendente",
+            "raw_data": raw_data,
         },
     )
 
@@ -68,6 +152,7 @@ def save_article(
     description: str,
     published_ts: int | None = None,
     feed_url: str | None = None,
+    raw_data: dict | None = None,
 ) -> int | None:
     published_at = datetime.fromtimestamp(published_ts, tz=timezone.utc) if published_ts is not None else None
     article, _ = Noticia.objects.update_or_create(
@@ -78,6 +163,7 @@ def save_article(
             "publicado_em": published_at,
             "feed_url": feed_url or "",
             "impacto": "pendente",
+            "raw_data": raw_data,
         },
     )
     return article.id
@@ -91,6 +177,22 @@ def link_article_match(article_id: int, asset_id: int) -> None:
 
     for carteira in Carteira.objects.filter(ativos=asset).select_related("usuario"):
         Alerta.objects.get_or_create(usuario=carteira.usuario, noticia=article, ativo=asset)
+
+
+def _ensure_article_summary(article_id: int, title: str, description: str, content: str) -> None:
+    article = Noticia.objects.filter(id=article_id).first()
+    if not article:
+        return
+    if article.resumo:
+        return
+
+    summary_result = summarize_article(title, description, content)
+    summary_text = (summary_result.get("summary") or "").strip()
+    article.resumo = summary_text
+    article.resumo_status = summary_result.get("status", "ok")
+    article.resumo_provider = summary_result.get("provider", "")
+    article.resumo_em = datetime.now(timezone.utc)
+    article.save(update_fields=["resumo", "resumo_status", "resumo_provider", "resumo_em"])
 
 
 def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
@@ -112,17 +214,24 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
             if cutoff and published < cutoff:
                 logger.debug("Ignorando artigo antigo: %s", entry.get("link") or entry.get("title") or "sem-link")
                 continue
-            link = entry.get("link") or ""
+            raw_link = entry.get("link") or entry.get("id") or ""
+            link = _normalize_link(raw_link)
             if not link or seen_article(link):
                 logger.debug("Ignorando artigo já visto ou sem link: %s", link or entry.get("title") or "sem-link")
                 continue
 
-            title = entry.get("title", "") or ""
-            description = entry.get("description", "") or entry.get("summary", "") or ""
-            content = " ".join(entry.get("content", [])) if entry.get("content") else ""
+            raw_title = entry.get("title", "") or ""
+            raw_description = entry.get("description", "") or entry.get("summary", "") or ""
+            raw_content = " ".join(entry.get("content", [])) if entry.get("content") else ""
+            raw_data = _safe_raw_data(entry.get("raw"))
+            title = _normalize_text(raw_title)
+            description_full = _normalize_text(raw_description)
+            content_full = _normalize_text(raw_content)
+            description = _truncate_text(description_full, settings.ARTICLE_DESCRIPTION_MAX_CHARS)
+            content = _truncate_text(content_full, settings.ARTICLE_CONTENT_MAX_CHARS)
             title_matches = _find_matches_in_text(title, watch_terms)
-            description_matches = _find_matches_in_text(description, watch_terms) if description else []
-            content_matches = _find_matches_in_text(content, watch_terms) if content else []
+            description_matches = _find_matches_in_text(description_full, watch_terms) if description_full else []
+            content_matches = _find_matches_in_text(content_full, watch_terms) if content_full else []
             matches = _unique_matches(title_matches, description_matches, content_matches)
 
             if description_matches and not title_matches:
@@ -142,15 +251,21 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
             if not matches:
                 logger.debug("Nenhuma correspondência local para artigo: %s", title)
 
-            mark_article_seen(link, int(published.timestamp()))
-            article_id = save_article(link, title, description or content, int(published.timestamp()), feed_url)
+            mark_article_seen(link, int(published.timestamp()), raw_data=raw_data)
+            article_id = save_article(
+                link,
+                title,
+                description or content,
+                int(published.timestamp()),
+                feed_url,
+                raw_data=raw_data,
+            )
             if not matches or not article_id:
                 logger.debug("Artigo persistido sem alerta: %s", title)
                 continue
 
             if not title_matches:
-                logger.debug("Menção fora do título, artigo persistido sem alerta: %s", title)
-                continue
+                logger.debug("Menção fora do título, validando com IA: %s", title)
 
             assets_for_llm = [{"id": watch_terms[code].get("id"), "code": code, "name": name} for code, name in matches]
             logger.info(
@@ -171,6 +286,8 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
             if not matched_codes:
                 logger.warning("IA sinalizou relevância sem coincidência local: %s | %s", title, ai_result.get("matched", []))
                 continue
+
+            _ensure_article_summary(article_id, title, description, content)
 
             for code in set(matched_codes):
                 asset_id = watch_terms[code].get("id")

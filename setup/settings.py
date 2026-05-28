@@ -34,6 +34,10 @@ def _env_float(name: str, default: float) -> float:
     return float(os.getenv(name, str(default)))
 
 
+def _env_int(name: str, default: int) -> int:
+    return int(os.getenv(name, str(default)))
+
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-!7*w_xu!*u^j7e)*3-5og_s)qa61#ra+2pc7y+y%4gc2nb!ow3")
 DEBUG = _env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
@@ -87,17 +91,15 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
 OPENAI_USE_CONTENT = _env_bool("OPENAI_USE_CONTENT", False)
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "100"))
+OPENAI_SUMMARY_MAX_TOKENS = int(os.getenv("OPENAI_SUMMARY_MAX_TOKENS", "180"))
+OPENAI_SUMMARY_TEMPERATURE = _env_float("OPENAI_SUMMARY_TEMPERATURE", 0.2)
+ARTICLE_DESCRIPTION_MAX_CHARS = _env_int("ARTICLE_DESCRIPTION_MAX_CHARS", 1200)
+ARTICLE_CONTENT_MAX_CHARS = _env_int("ARTICLE_CONTENT_MAX_CHARS", 4000)
 
 MONITOR_INTERVAL_SECONDS = int(os.getenv("MONITOR_INTERVAL_SECONDS", "300"))
 ARTICLE_RETENTION_DAYS = int(os.getenv("ARTICLE_RETENTION_DAYS", "1"))
 START_MONITOR_ON_SERVER = _env_bool("DJANGO_START_MONITOR", True)
 START_SCHEDULER_ON_SERVER = _env_bool("DJANGO_START_SCHEDULER", True)
-AUTO_LOGIN_ADMIN_ON_SERVER = _env_bool("DJANGO_AUTO_LOGIN_ADMIN", True)
-AUTO_LOGIN_ADMIN_USERNAME = os.getenv("DJANGO_AUTO_LOGIN_ADMIN_USERNAME", "admin")
-AUTO_LOGIN_ADMIN_PASSWORD = os.getenv("DJANGO_AUTO_LOGIN_ADMIN_PASSWORD", "admin123")
-AUTO_LOGIN_ADMIN_EMAIL = os.getenv("DJANGO_AUTO_LOGIN_ADMIN_EMAIL", "admin@example.com")
-OPENAI_CHAT_MAX_TOKENS = int(os.getenv("OPENAI_CHAT_MAX_TOKENS", "500"))
-OPENAI_CHAT_TEMPERATURE = _env_float("OPENAI_CHAT_TEMPERATURE", 0.4)
 
 DATABASES = {
     "default": {

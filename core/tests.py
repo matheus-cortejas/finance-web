@@ -10,25 +10,12 @@ import django
 django.setup()
 
 from django.contrib.auth.models import User
-from django.conf import settings
 from django.test import TestCase
 from django.urls import reverse
 from unittest.mock import patch
 
 from core.models import Ativo, Carteira
 from core.services import noticia_service
-
-
-class HomeAutoLoginTests(TestCase):
-    def test_home_auto_logs_in_admin_when_runserver_is_active(self):
-        with patch("core.views._is_runserver_context", return_value=True), patch.object(
-            settings, "AUTO_LOGIN_ADMIN_ON_SERVER", True
-        ):
-            response = self.client.get(reverse("home"), follow=True)
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.wsgi_request.user.is_authenticated)
-        self.assertEqual(response.wsgi_request.user.username, settings.AUTO_LOGIN_ADMIN_USERNAME)
 
 
 class WebViewsTests(TestCase):
@@ -41,6 +28,17 @@ class WebViewsTests(TestCase):
         response = self.client.get(reverse("dashboard"))
         self.assertEqual(response.status_code, 302)
         self.assertIn(reverse("login"), response.url)
+
+    def test_home_redirects_anonymous_users_to_login(self):
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+
+    def test_home_redirects_authenticated_users_to_dashboard(self):
+        self.client.login(username=self.username, password="secret")
+        response = self.client.get(reverse("home"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("dashboard"), response.url)
 
     def test_dashboard_renders_for_authenticated_user(self):
         self.client.login(username=self.username, password="secret")
@@ -131,7 +129,8 @@ class WebViewsTests(TestCase):
         original_asset = self.asset
         with patch.object(noticia_service, "create_parser", return_value=parser), \
             patch.object(noticia_service, "seen_article", return_value=False), \
-            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}):
+            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
+            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}):
             noticia_service.check_feeds_and_report(
                 ["https://example.test/feed"],
                 [{"id": original_asset.id, "code": original_asset.ticker, "name": original_asset.nome}],
@@ -140,4 +139,81 @@ class WebViewsTests(TestCase):
 
         response = self.client.get(reverse("dashboard"))
         self.assertContains(response, "Petrobras anuncia investimento")
+        self.assertContains(response, "Resumo gerado")
         self.assertContains(response, 'target="_blank"')
+
+    def test_alert_created_when_match_only_in_content(self):
+        self.client.login(username=self.username, password="secret")
+        self.client.post(reverse("dashboard"), {"asset_term": "PETR4"}, follow=True)
+
+        parser = type(
+            "ParserStub",
+            (),
+            {
+                "fetch": lambda self: {
+                    "href": "https://example.test/feed",
+                    "entries": [
+                        {
+                            "title": "Mercado em foco",
+                            "description": "",
+                            "summary": "",
+                            "content": ["PETR4 avanca com novos dados"],
+                            "link": "https://example.test/petrobras-content",
+                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                        }
+                    ],
+                }
+            },
+        )()
+
+        original_asset = self.asset
+        with patch.object(noticia_service, "create_parser", return_value=parser), \
+            patch.object(noticia_service, "seen_article", return_value=False), \
+            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
+            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}):
+            noticia_service.check_feeds_and_report(
+                ["https://example.test/feed"],
+                [{"id": original_asset.id, "code": original_asset.ticker, "name": original_asset.nome}],
+                within_days=1,
+            )
+
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Mercado em foco")
+
+    def test_alert_created_when_alias_matches_content(self):
+        self.client.login(username=self.username, password="secret")
+        self.client.post(reverse("dashboard"), {"asset_term": "PETR4"}, follow=True)
+
+        parser = type(
+            "ParserStub",
+            (),
+            {
+                "fetch": lambda self: {
+                    "href": "https://example.test/feed",
+                    "entries": [
+                        {
+                            "title": "Noticias do setor",
+                            "description": "",
+                            "summary": "",
+                            "content": ["PETR sobe no pregão"],
+                            "link": "https://example.test/petrobras-alias",
+                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+                        }
+                    ],
+                }
+            },
+        )()
+
+        original_asset = self.asset
+        with patch.object(noticia_service, "create_parser", return_value=parser), \
+            patch.object(noticia_service, "seen_article", return_value=False), \
+            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
+            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}):
+            noticia_service.check_feeds_and_report(
+                ["https://example.test/feed"],
+                [{"id": original_asset.id, "code": original_asset.ticker, "name": original_asset.nome}],
+                within_days=1,
+            )
+
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Noticias do setor")
