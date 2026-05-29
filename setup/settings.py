@@ -88,7 +88,7 @@ DEFAULT_RSS_PATH = Path(os.getenv("RSS_PATH", PROJECT_ROOT / "rss.txt"))
 LOG_FILE_PATH = Path(os.getenv("LOG_FILE_PATH", PROJECT_ROOT / "logs" / "monitor.log"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_USE_CONTENT = _env_bool("OPENAI_USE_CONTENT", False)
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "100"))
 OPENAI_SUMMARY_MAX_TOKENS = int(os.getenv("OPENAI_SUMMARY_MAX_TOKENS", "180"))

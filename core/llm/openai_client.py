@@ -106,6 +106,20 @@ _URGENT_HINTS = {
     "alerta",
 }
 
+_SECTOR_HINTS = {
+    "financeiro": ["banco", "financeir", "segur", "credito", "cartao", "corretora"],
+    "energia": ["energia", "eletric", "petroleo", "oleo", "gas", "combustivel"],
+    "mineracao": ["mineracao", "minera", "siderurgia", "aco", "ferro", "minerio"],
+    "papel_e_celulose": ["celulose", "papel"],
+    "varejo": ["varejo", "varej", "loja", "e-commerce", "shopping"],
+    "agro": ["agro", "agr", "soja", "milho", "acucar", "etanol", "fertiliz"],
+    "saude": ["saude", "hospital", "farmac", "medic", "clinica", "biotech"],
+    "tecnologia": ["tecnologia", "software", "digital", "nuvem", "dados"],
+    "telecom": ["telecom", "telefon", "5g", "fibra", "internet"],
+    "construcao": ["construcao", "construtora", "incorporacao", "imobiliario", "imovel"],
+    "transporte": ["logistica", "transporte", "aeroporto", "rodovia", "ferrovia", "porto"],
+}
+
 
 def _extract_json_object(text: str) -> dict | None:
     if not text:
@@ -184,6 +198,57 @@ def _normalize_classification_payload(payload: dict | None) -> dict:
     }
 
 
+def _infer_setor(text: str) -> str:
+    for setor, hints in _SECTOR_HINTS.items():
+        if any(hint in text for hint in hints):
+            return setor
+    return ""
+
+
+def _infer_tipo_evento(text: str) -> str:
+    if re.search(r"\b(fato relevante|fato_relevante|fr)\b", text):
+        return "fato_relevante"
+    if re.search(r"\b(resultado|balanco|trimestre|trimestral|lucro|receita|ebitda|guidance)\b", text):
+        return "resultado"
+    if re.search(r"\b(fusao|aquisicao|aquisição|cisao|incorporacao|joint venture|opa)\b", text):
+        return "fusao_aquisicao"
+    if re.search(r"\b(cvm|cade|bacen|anac|anp|regulatorio|regulacao|licenca|multa)\b", text):
+        return "regulatorio"
+    if re.search(r"\b(ipca|selic|copom|inflacao|pib|dolar|cambio|macro)\b", text):
+        return "macro"
+    if re.search(r"\b(recomendacao|analise|rating|upgrade|downgrade|preco alvo|price target)\b", text):
+        return "analise"
+    if re.search(r"\b(ibovespa|bolsa|mercado|volume|liquidez)\b", text):
+        return "mercado"
+    return "outro"
+
+def _build_token_kwargs(token_limit: int | None) -> dict:
+    try:
+        limit = int(token_limit) if token_limit is not None else None
+    except Exception:
+        limit = None
+    if not limit:
+        return {}
+    if OPENAI_MODEL and "gpt-5" in OPENAI_MODEL:
+        return {"max_completion_tokens": limit}
+    return {"max_tokens": limit}
+
+def _build_temperature_kwargs(temp_value: float | None) -> dict:
+    try:
+        t = float(temp_value) if temp_value is not None else None
+    except Exception:
+        return {}
+    if t is None:
+        return {}
+    # Some gpt-5 family models currently reject non-default temperature (e.g. 0.0).
+    # To avoid 400 errors, do not pass a non-default temperature for gpt-5 models.
+    if OPENAI_MODEL and "gpt-5" in OPENAI_MODEL:
+        # only pass temperature if it equals 1.0 (the allowed default); otherwise skip it
+        if t == 1.0:
+            return {"temperature": t}
+        return {}
+    return {"temperature": t}
+
 def _extract_related_tickers(text: str, assets: list) -> list[str]:
     if not text:
         return []
@@ -191,9 +256,14 @@ def _extract_related_tickers(text: str, assets: list) -> list[str]:
     tickers = []
     for asset in assets or []:
         code = (asset.get("code") or "").strip().upper()
+        name = (asset.get("name") or "").strip().lower()
         if not code:
             continue
-        if code.lower() in text_lower and code not in tickers:
+        if re.search(r"(?<!\w)" + re.escape(code.lower()) + r"(?!\w)", text_lower):
+            if code not in tickers:
+                tickers.append(code)
+            continue
+        if name and name in text_lower and code not in tickers:
             tickers.append(code)
     return tickers
 
@@ -214,28 +284,32 @@ def _heuristic_classification(title: str, description: str, content: str, assets
     if any(word in text for word in _URGENT_HINTS):
         urgencia = "alta"
 
-    tipo_evento = "outro"
-    if "resultado" in text or "balanco" in text:
-        tipo_evento = "resultado"
-    elif "fusao" in text or "aquisicao" in text or "aquisição" in text:
-        tipo_evento = "fusao_aquisicao"
-    elif "regulatorio" in text or "regulação" in text or "regulacao" in text:
-        tipo_evento = "regulatorio"
+    tipo_evento = _infer_tipo_evento(text)
+    setor = _infer_setor(text)
 
     tickers_relacionados = _extract_related_tickers(text, assets)
     relevancia_llm = 0.7 if tickers_relacionados else 0.3
 
-    return {
+    result = {
         "sentimento": sentimento,
         "impacto": impacto,
         "urgencia": urgencia,
-        "setor": "",
+        "setor": setor,
         "tipo_evento": tipo_evento,
         "tickers_relacionados": tickers_relacionados,
         "relevancia_llm": relevancia_llm,
         "provider": "fallback",
         "status": "fallback",
     }
+    return _heuristic_override_classification(title, description, content, result)
+
+
+def classify_article_heuristic(title: str, description: str, content: str, assets: list | None = None) -> dict:
+    assets = assets or []
+    result = _heuristic_classification(title, description, content, assets)
+    result["provider"] = "heuristic"
+    result["status"] = "heuristic"
+    return result
 
 
 def _heuristic_relevance(title: str, description: str, content: str, assets: list) -> dict:
@@ -306,9 +380,9 @@ def judge_article_relevance(title: str, description: str, content: str, assets: 
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=0.0,
-            max_tokens=OPENAI_MAX_TOKENS,
             n=1,
+            **_build_token_kwargs(OPENAI_MAX_TOKENS),
+            **_build_temperature_kwargs(0.0),
         )
         choice = response.choices[0]
         output = (choice.message.content or "").strip()
@@ -376,8 +450,8 @@ def summarize_article(title: str, description: str, content: str) -> dict:
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=OPENAI_SUMMARY_TEMPERATURE,
-            max_tokens=OPENAI_SUMMARY_MAX_TOKENS,
+            **_build_token_kwargs(OPENAI_SUMMARY_MAX_TOKENS),
+            **_build_temperature_kwargs(OPENAI_SUMMARY_TEMPERATURE),
         )
         summary = (response.choices[0].message.content or "").strip()
         if not summary:
@@ -392,6 +466,51 @@ def summarize_article(title: str, description: str, content: str) -> dict:
             "provider": "fallback",
         }
 
+def _heuristic_override_classification(title: str, description: str, content: str, normalized: dict) -> dict:
+    text = f"{title}\n{description}\n{content}".lower()
+    if not normalized.get("setor"):
+        normalized["setor"] = _infer_setor(text)
+    if normalized.get("tipo_evento") in {"", "outro"}:
+        normalized["tipo_evento"] = _infer_tipo_evento(text)
+    # explicit negative words
+    if re.search(r'\b(preju[ií]zo|prejuizo|fraude|multa|suspens[ãa]o|rebaixamento|downgrade|perda)\b', text):
+        normalized["sentimento"] = "negativo"
+        normalized["impacto"] = normalized.get("impacto", "medio")
+        return normalized
+
+    # negative percent patterns: "queda ... 32%" or "redução de 32%"
+    m = re.search(r'\b(queda|redu[cç][aã]o|reducao|perda)\b(?:.{0,60}?)(\d{1,3}(?:[.,]\d+)?)\s*%', text)
+    if m:
+        try:
+            pct = float(m.group(2).replace(",", "."))
+        except Exception:
+            pct = None
+        normalized["sentimento"] = "negativo"
+        if pct is not None and pct >= 20:
+            normalized["impacto"] = "alto"
+        else:
+            normalized["impacto"] = normalized.get("impacto", "medio")
+        return normalized
+
+    # 'lucro' mentioned together with 'queda' -> negative
+    if "lucro" in text and re.search(r'\b(queda|redu[cç][aã]o|reducao|perda)\b', text):
+        normalized["sentimento"] = "negativo"
+        return normalized
+
+    # positive percent patterns
+    m2 = re.search(r'\b(aumentou|alta|subiu|crescimento|cresceu|aumento|recorde)\b(?:.{0,60}?)(\d{1,3}(?:[.,]\d+)?)?\s*%', text)
+    if m2:
+        normalized["sentimento"] = "positivo"
+        if m2.group(2):
+            try:
+                pct = float(m2.group(2).replace(",", "."))
+                if pct >= 20:
+                    normalized["impacto"] = "alto"
+            except Exception:
+                pass
+        return normalized
+
+    return normalized
 
 def classify_article(title: str, description: str, content: str, assets: list | None = None) -> dict:
     assets = assets or []
@@ -420,19 +539,23 @@ def classify_article(title: str, description: str, content: str, assets: list | 
         response = client.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
-            temperature=0.0,
-            max_tokens=OPENAI_MAX_TOKENS,
             n=1,
+            **_build_token_kwargs(OPENAI_MAX_TOKENS),
+            **_build_temperature_kwargs(0.0),
         )
         output = (response.choices[0].message.content or "").strip()
         payload = _extract_json_object(output)
         normalized = _normalize_classification_payload(payload)
+        normalized = _heuristic_override_classification(title, description, content, normalized)
+        if assets:
+            tickers = normalized.get("tickers_relacionados")
+            if not tickers:
+                tickers = _extract_related_tickers(text, assets)
+            if not tickers:
+                tickers = [asset.get("code") for asset in assets if asset.get("code")]
+            normalized["tickers_relacionados"] = _normalize_tickers(tickers)
         normalized["provider"] = "openai"
         normalized["status"] = "ok"
-        if assets:
-            normalized["tickers_relacionados"] = _normalize_tickers(
-                normalized.get("tickers_relacionados") or _extract_related_tickers(text, assets)
-            )
         logger.info("Classificacao estruturada concluida: sentimento=%s impacto=%s urgencia=%s", normalized["sentimento"], normalized["impacto"], normalized["urgencia"])
         return normalized
     except Exception as exc:
