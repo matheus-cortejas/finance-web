@@ -35,42 +35,17 @@ def _parse_date(entry) -> datetime:
     return datetime.now(timezone.utc)
 
 
+# Expressões regulares e constantes
 _TAG_RE = re.compile(r"<[^>]+>")
 _CODE_LETTERS_RE = re.compile(r"\d+")
 _TRACKING_PARAMS = {
-    "fbclid",
-    "gclid",
-    "igshid",
-    "mc_cid",
-    "mc_eid",
-    "mkt_tok",
-    "utm_campaign",
-    "utm_content",
-    "utm_medium",
-    "utm_source",
-    "utm_term",
+    "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "mkt_tok",
+    "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",
 }
 
 
-def _normalize_text(text: str) -> str:
-    if not text:
-        return ""
-    cleaned = html.unescape(text)
-    cleaned = _TAG_RE.sub(" ", cleaned)
-    cleaned = re.sub(r"\s+", " ", cleaned)
-    return cleaned.strip()
-
-
-def _truncate_text(text: str, limit: int) -> str:
-    if not text or limit <= 0:
-        return ""
-    if len(text) <= limit:
-        return text
-    trimmed = text[:limit].rsplit(" ", 1)[0]
-    return trimmed if trimmed else text[:limit]
-
-
 def _normalize_link(link: str) -> str:
+    """Remove parâmetros de tracking da URL."""
     if not link:
         return ""
     try:
@@ -99,6 +74,7 @@ def _safe_raw_data(raw_entry) -> dict | None:
 
 
 def _code_aliases(code: str) -> list[str]:
+    """Retorna possíveis aliases para um ticker (ex: PETR4 -> PETR)."""
     if not code:
         return []
     letters_only = _CODE_LETTERS_RE.sub("", code).strip()
@@ -108,6 +84,7 @@ def _code_aliases(code: str) -> list[str]:
 
 
 def _find_matches_in_text(text: str, watch_terms: dict) -> list[tuple[str, str]]:
+    """Busca tickers ou nomes de empresas no texto (match superficial)."""
     text_lower = text.lower()
     matches = []
     for code, meta in watch_terms.items():
@@ -126,6 +103,7 @@ def _find_matches_in_text(text: str, watch_terms: dict) -> list[tuple[str, str]]
 
 
 def _unique_matches(*match_groups: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Junta matches de várias fontes removendo duplicatas."""
     unique = []
     seen_codes = set()
     for group in match_groups:
@@ -163,19 +141,22 @@ def save_article(
     published_ts: int | None = None,
     feed_url: str | None = None,
     raw_data: dict | None = None,
+    content: str | None = None,          # NOVO: parâmetro para conteúdo limpo
 ) -> int | None:
     published_at = datetime.fromtimestamp(published_ts, tz=timezone.utc) if published_ts is not None else None
-    article, _ = Noticia.objects.update_or_create(
-        link=link,
-        defaults={
-            "titulo": title,
-            "descricao": description,
-            "publicado_em": published_at,
-            "feed_url": feed_url or "",
-            "impacto": "pendente",
-            "raw_data": raw_data,
-        },
-    )
+    defaults = {
+        "titulo": title,
+        "descricao": description,
+        "publicado_em": published_at,
+        "feed_url": feed_url or "",
+        "impacto": "pendente",
+        "raw_data": raw_data,
+    }
+    # Se o model tiver o campo 'conteudo', inclui (caso contrário, será ignorado pelo update_or_create)
+    if content is not None and hasattr(Noticia, 'conteudo'):
+        defaults["conteudo"] = content
+
+    article, _ = Noticia.objects.update_or_create(link=link, defaults=defaults)
     return article.id
 
 
@@ -213,12 +194,7 @@ def _ensure_article_classification(
     assets: list | None = None,
 ) -> NoticiaClassificacao | None:
     return _ensure_article_classification_force(
-        article_id,
-        title,
-        description,
-        content,
-        assets=assets,
-        force=False,
+        article_id, title, description, content, assets=assets, force=False
     )
 
 
@@ -353,57 +329,64 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
         feed_url = parsed.get("href", url)
         entries = parsed.get("entries", [])
         logger.debug("Feed %s retornou %d entrie(s)", feed_url, len(entries))
+
         for entry in entries:
             published = _parse_date(entry)
             if cutoff and published < cutoff:
                 logger.debug("Ignorando artigo antigo: %s", entry.get("link") or entry.get("title") or "sem-link")
                 continue
+
             raw_link = entry.get("link") or entry.get("id") or ""
             link = _normalize_link(raw_link)
             if not link or seen_article(link):
                 logger.debug("Ignorando artigo já visto ou sem link: %s", link or entry.get("title") or "sem-link")
                 continue
 
-            raw_title = entry.get("title", "") or ""
-            raw_description = entry.get("description", "") or entry.get("summary", "") or ""
-            raw_content = " ".join(entry.get("content", [])) if entry.get("content") else ""
-            raw_data = _safe_raw_data(entry.get("raw"))
-            title = _normalize_text(raw_title)
-            description_full = _normalize_text(raw_description)
-            content_full = _normalize_text(raw_content)
-            description = _truncate_text(description_full, settings.ARTICLE_DESCRIPTION_MAX_CHARS)
-            content = _truncate_text(content_full, settings.ARTICLE_CONTENT_MAX_CHARS)
+            # O parser já retorna texto limpo (sem HTML, sem entidades)
+            title = (entry.get("title") or "").strip()
+            description_full = (entry.get("description") or "").strip()
+            content_full = (entry.get("content") or "").strip()      # string, não lista
+
+            # Fallback: se descrição estiver vazia, usa o início do conteúdo
+            if not description_full and content_full:
+                description_full = content_full[:500]
+
+            # Trunca conforme configuração
+            description = description_full[:settings.ARTICLE_DESCRIPTION_MAX_CHARS] if description_full else ""
+            content = content_full[:settings.ARTICLE_CONTENT_MAX_CHARS] if content_full else ""
+
+            # Log para debug (pode ser removido em produção)
+            logger.debug(
+                "Artigo: title=%s, desc_len=%d, content_len=%d, link=%s",
+                title, len(description), len(content), link
+            )
+
+            # Matches superficiais (ticker, nome, alias)
             title_matches = _find_matches_in_text(title, watch_terms)
             description_matches = _find_matches_in_text(description_full, watch_terms) if description_full else []
             content_matches = _find_matches_in_text(content_full, watch_terms) if content_full else []
             matches = _unique_matches(title_matches, description_matches, content_matches)
 
             if description_matches and not title_matches:
-                logger.debug(
-                    "Menção apenas na descrição, encaminhando para IA: %s | %s",
-                    title,
-                    [code for code, _ in description_matches],
-                )
-
+                logger.debug("Menção apenas na descrição: %s | %s", title, [c for c, _ in description_matches])
             if content_matches and not title_matches:
-                logger.debug(
-                    "Menção apenas no conteúdo, encaminhando para IA: %s | %s",
-                    title,
-                    [code for code, _ in content_matches],
-                )
-
+                logger.debug("Menção apenas no conteúdo: %s | %s", title, [c for c, _ in content_matches])
             if not matches:
                 logger.debug("Nenhuma correspondência local para artigo: %s", title)
 
+            # Persiste a notícia mesmo sem matches (apenas para histórico)
+            raw_data = _safe_raw_data(entry.get("raw"))
             mark_article_seen(link, int(published.timestamp()), raw_data=raw_data)
             article_id = save_article(
-                link,
-                title,
-                description or content,
-                int(published.timestamp()),
-                feed_url,
+                link=link,
+                title=title,
+                description=description or content,   # se desc vazia, usa conteúdo
+                published_ts=int(published.timestamp()),
+                feed_url=feed_url,
                 raw_data=raw_data,
+                content=content,                      # salva conteúdo limpo (se campo existir)
             )
+
             if not matches or not article_id:
                 logger.debug("Artigo persistido sem alerta: %s", title)
                 continue
@@ -411,41 +394,50 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
             if not title_matches:
                 logger.debug("Menção fora do título, validando com IA: %s", title)
 
-            assets_for_llm = [{"id": watch_terms[code].get("id"), "code": code, "name": name} for code, name in matches]
+            assets_for_llm = [
+                {"id": watch_terms[code].get("id"), "code": code, "name": name}
+                for code, name in matches
+            ]
             logger.info(
-                "Enviando artigo para avaliacao da IA: title=%s matches=%s assets_for_llm=%s",
-                title,
-                [code for code, _ in matches],
-                [asset.get("code") for asset in assets_for_llm],
+                "Enviando artigo para avaliacao da IA: title=%s matches=%s",
+                title, [code for code, _ in matches]
             )
+
+            # LLM barata para relevância binária
             ai_result = is_relevant(title, description, content, assets_for_llm)
-            logger.info("Resultado da avaliacao IA: relevant=%s matched=%s reason=%s", ai_result.get("relevant"), ai_result.get("matched"), ai_result.get("reason", ""))
+            logger.info(
+                "Resultado IA: relevant=%s matched=%s reason=%s",
+                ai_result.get("relevant"), ai_result.get("matched"), ai_result.get("reason", "")
+            )
+
             if not ai_result.get("relevant"):
                 logger.info("Artigo rejeitado pela relevância: %s | %s", title, ai_result.get("reason", ""))
                 continue
 
+            # Filtra apenas os códigos que realmente deram match local
             local_codes = {code for code, _ in matches}
-            matched_codes = [code for code in (ai_result.get("matched") or [code for code, _ in matches]) if code in watch_terms]
-            matched_codes = [code for code in matched_codes if code in local_codes]
+            matched_codes = [
+                code for code in (ai_result.get("matched") or [code for code, _ in matches])
+                if code in watch_terms and code in local_codes
+            ]
             if not matched_codes:
                 logger.warning("IA sinalizou relevância sem coincidência local: %s | %s", title, ai_result.get("matched", []))
                 continue
 
+            # Gera resumo e classificação estruturada
             _ensure_article_summary(article_id, title, description, content)
+
             matched_asset_ids = [
                 watch_terms[code].get("id")
                 for code in matched_codes
                 if watch_terms[code].get("id") is not None
             ]
+
             classification = None
             if settings.ENABLE_PRIORITY_ENGINE:
                 classification = _ensure_article_classification_force(
-                    article_id,
-                    title,
-                    description,
-                    content,
-                    assets=assets_for_llm,
-                    force=True,
+                    article_id, title, description, content,
+                    assets=assets_for_llm, force=True
                 )
                 article = Noticia.objects.filter(id=article_id).first()
                 if article:
@@ -459,13 +451,12 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
                     link_article_match(article_id, asset_id)
                     logger.info("Alerta persistido: title=%s codigo=%s asset_id=%s", title, code, asset_id)
 
-            reports.append(
-                {
-                    "published": published.isoformat(),
-                    "title": title,
-                    "link": link,
-                    "matches": [(code, watch_terms.get(code, {}).get("name")) for code in matched_codes],
-                    "reason": ai_result.get("reason", ""),
-                }
-            )
+            reports.append({
+                "published": published.isoformat(),
+                "title": title,
+                "link": link,
+                "matches": [(code, watch_terms.get(code, {}).get("name")) for code in matched_codes],
+                "reason": ai_result.get("reason", ""),
+            })
+
     return reports

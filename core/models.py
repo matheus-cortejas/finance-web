@@ -29,6 +29,7 @@ class Noticia(models.Model):
 	link = models.URLField(unique=True)
 	titulo = models.CharField(max_length=500, blank=True, default="")
 	descricao = models.TextField(blank=True, default="")
+	conteudo = models.TextField(blank=True, null=True)	
 	resumo = models.TextField(blank=True, default="")
 	resumo_status = models.CharField(max_length=32, blank=True, default="pendente")
 	resumo_provider = models.CharField(max_length=32, blank=True, default="")
