@@ -14,15 +14,6 @@
         <h1 class="h2 fw-bold hero-title mb-0 mt-2">Monitor Financeiro</h1>
         <p class="hero-subtitle mb-0">Carteira, alertas e inteligência de mercado.</p>
     </div>
-    <div class="d-flex flex-wrap align-items-center gap-2">
-        <a href="{% url 'lista_noticias' %}" class="btn btn-outline-secondary btn-sm">Ver todas as notícias</a>
-        <a href="{% url 'meus_alertas' %}" class="btn btn-outline-primary btn-sm">Ver todos os alertas</a>
-        <span class="badge text-bg-light border px-3 py-2">{{ request.user.username }}</span>
-        <form method="post" action="{% url 'logout' %}" class="d-inline">
-            {% csrf_token %}
-            <button class="btn btn-outline-danger" type="submit">Sair</button>
-        </form>
-    </div>
 </div>
 
 {% if messages %}
@@ -35,27 +26,48 @@
 
 <!-- Cards de métricas -->
 <div class="row g-4 mb-4 fade-in">
-    <div class="col-md-3 col-6">
+    <div class="col-xl-3 col-lg-4 col-md-6 col-12">
         <div class="glass surface p-3 text-center">
-            <div class="display-6 fw-bold">{{ portfolio_assets|length }}</div>
+            <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="var(--app-accent)" viewBox="0 0 16 16">
+                    <path d="M0 0h1v15h15v1H0V0Zm14.817 3.113a.5.5 0 0 1 .07.704l-4.5 5.5a.5.5 0 0 1-.74.037L7.06 6.767l-3.656 5.027a.5.5 0 0 1-.808-.588l4-5.5a.5.5 0 0 1 .758-.06l2.609 2.61 4.15-5.073a.5.5 0 0 1 .704-.07Z"/>
+                </svg>
+                <div class="display-6 fw-bold">{{ portfolio_assets|length }}</div>
+            </div>
             <div class="text-app-muted small">Ativos na carteira</div>
         </div>
     </div>
-    <div class="col-md-3 col-6">
+    <div class="col-xl-3 col-lg-4 col-md-6 col-12">
         <div class="glass surface p-3 text-center">
-            <div class="display-6 fw-bold">{{ alertas_24h|default:0 }}</div>
+            <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="var(--app-accent-2)" viewBox="0 0 16 16">
+                    <path d="M8 16a2 2 0 0 0 1.985-1.75c.017-.137-.097-.25-.235-.25h-3.5c-.138 0-.252.113-.235.25A2 2 0 0 0 8 16ZM3 5a5 5 0 0 1 10 0v2.947c0 .05.015.098.042.139l1.703 2.555A1.519 1.519 0 0 1 13.482 13H2.518a1.516 1.516 0 0 1-1.263-2.36l1.703-2.554A.255.255 0 0 0 3 7.947V5Zm5-3.5A3.5 3.5 0 0 0 4.5 5v2.947c0 .346-.102.683-.294.97l-1.703 2.556a.017.017 0 0 0-.003.01l.001.006c0 .002.002.004.004.006l.006.004.007.001h10.964l.007-.001.006-.004.004-.006.001-.007a.017.017 0 0 0-.003-.01l-1.703-2.554a1.745 1.745 0 0 1-.294-.97V5A3.5 3.5 0 0 0 8 1.5Z"/>
+                </svg>
+                <div class="display-6 fw-bold">{{ alertas_24h|default:0 }}</div>
+            </div>
             <div class="text-app-muted small">Alertas (últimas 24h)</div>
         </div>
     </div>
-    <div class="col-md-3 col-6">
+    <div class="col-xl-3 col-lg-4 col-md-6 col-12">
         <div class="glass surface p-3 text-center">
-            <div class="display-6 fw-bold">{{ avg_score|default:0 }}</div>
+            <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#198754" viewBox="0 0 16 16">
+                    <path d="M1 11a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-3zm5-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V7zm5-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1h-2a1 1 0 0 1-1-1V2z"/>
+                </svg>
+                <div class="display-6 fw-bold">{{ avg_score|default:0 }}</div>
+            </div>
             <div class="text-app-muted small">Score médio</div>
         </div>
     </div>
-    <div class="col-md-3 col-6">
+    <div class="col-xl-3 col-lg-4 col-md-6 col-12">
         <div class="glass surface p-3 text-center">
-            <div class="display-6 fw-bold">{{ noticias_hoje|default:0 }}</div>
+            <div class="d-flex align-items-center justify-content-center gap-2 mb-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="#6f42c1" viewBox="0 0 16 16">
+                    <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4z"/>
+                    <path d="M4.5 10a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0-2a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0-2a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 1-.5-.5z"/>
+                </svg>
+                <div class="display-6 fw-bold">{{ noticias_hoje|default:0 }}</div>
+            </div>
             <div class="text-app-muted small">Notícias hoje</div>
         </div>
     </div>
@@ -63,22 +75,40 @@
 
 <!-- Gráficos -->
 <div class="row g-4 mb-4 fade-in">
-    <div class="col-md-4">
+    <div class="col-lg-4">
         <div class="glass surface p-3">
             <h3 class="h6 fw-bold">Sentimento (últimos 30 dias)</h3>
-            <canvas id="sentimentoChart" width="400" height="200"></canvas>
+            <div style="position: relative; height: 200px;">
+                {% if sentimento_labels %}
+                <canvas id="sentimentoChart"></canvas>
+                {% else %}
+                <div class="d-flex align-items-center justify-content-center h-100 text-app-muted small">Sem dados</div>
+                {% endif %}
+            </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-lg-4">
         <div class="glass surface p-3">
             <h3 class="h6 fw-bold">Urgência (últimos 30 dias)</h3>
-            <canvas id="urgenciaChart" width="400" height="200"></canvas>
+            <div style="position: relative; height: 200px;">
+                {% if urgencia_labels %}
+                <canvas id="urgenciaChart"></canvas>
+                {% else %}
+                <div class="d-flex align-items-center justify-content-center h-100 text-app-muted small">Sem dados</div>
+                {% endif %}
+            </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-lg-4">
         <div class="glass surface p-3">
             <h3 class="h6 fw-bold">Categorias em alta</h3>
-            <canvas id="categoriaChart" width="400" height="200"></canvas>
+            <div style="position: relative; height: 200px;">
+                {% if categoria_labels %}
+                <canvas id="categoriaChart"></canvas>
+                {% else %}
+                <div class="d-flex align-items-center justify-content-center h-100 text-app-muted small">Sem dados</div>
+                {% endif %}
+            </div>
         </div>
     </div>
 </div>
@@ -115,7 +145,11 @@
                         <form method="post" action="{% url 'dashboard' %}" class="m-0">
                             {% csrf_token %}
                             <input type="hidden" name="remove_asset_id" value="{{ asset.id }}">
-                            <button class="btn btn-sm btn-outline-danger" type="submit">Remover</button>
+                            <button class="btn btn-sm btn-outline-danger" type="submit" title="Remover">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                                </svg>
+                            </button>
                         </form>
                     </div>
                 {% empty %}
@@ -128,7 +162,12 @@
                             <input id="asset-term-input" class="form-control" type="text" name="asset_term" placeholder="Adicionar ativo" autocomplete="off" data-suggestions-url="{% url 'asset_suggestions' %}">
                         </div>
                         <div class="col-4">
-                            <button class="btn btn-primary w-100" type="submit">+</button>
+                            <button class="btn btn-primary w-100" type="submit">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+                                    <path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4z"/>
+                                </svg>
+                                Adicionar
+                            </button>
                         </div>
                     </form>
                     <div id="asset-suggestions" class="list-group mt-2 d-none"></div>
@@ -195,7 +234,12 @@
                         {{ perfil_form.setores_preferidos_text }}
                     </div>
                     <div class="col-12">
-                        <button class="btn btn-outline-primary w-100" type="submit">Salvar perfil</button>
+                        <button class="btn btn-outline-primary w-100" type="submit">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+                                <path d="M10.97 4.97a.75.75 0 0 1 1.07 1.05l-3.99 4.99a.75.75 0 0 1-1.08.02L4.324 8.384a.75.75 0 1 1 1.06-1.06l2.094 2.093 3.473-4.425a.267.267 0 0 1 .02-.022z"/>
+                            </svg>
+                            Salvar perfil
+                        </button>
                     </div>
                 </div>
             </form>
@@ -237,7 +281,12 @@
                         {% if alert.noticia.resumo %}
                             <div class="text-app-muted small mt-2">{{ alert.noticia.resumo }}</div>
                         {% endif %}
-                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-interaction-action="ignorar" data-noticia-id="{{ alert.noticia.id }}">Ignorar</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary mt-2" data-interaction-action="ignorar" data-noticia-id="{{ alert.noticia.id }}" title="Ignorar noticia">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+                                <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708z"/>
+                            </svg>
+                            Ignorar
+                        </button>
                     </div>
                 {% empty %}
                     <div class="list-group-item px-0 bg-transparent">Nenhum alerta ainda.</div>
@@ -272,7 +321,12 @@
                         <option value="neutro" {% if request.GET.sentiment == 'neutro' %}selected{% endif %}>Neutro</option>
                         <option value="negativo" {% if request.GET.sentiment == 'negativo' %}selected{% endif %}>Negativo</option>
                     </select>
-                    <button class="btn btn-outline-primary btn-sm" type="submit">Filtrar</button>
+                    <button class="btn btn-outline-primary btn-sm" type="submit">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+                            <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.276.447l-4.724 2.362a1 1 0 0 0-.553.894v1.084l2.272 1.136a.5.5 0 0 1 0 .894L7.938 13v1.084a1 1 0 0 0 .553.894l4.724 2.362A.5.5 0 0 1 14 17v2a.5.5 0 0 1-.5.5H2a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 1 .276-.447L6.553 12.106a1 1 0 0 0 .553-.894V10.13L4.78 8.994a.5.5 0 0 1 0-.894L9.053 6.856A1 1 0 0 0 9.606 5.96V4.876a1 1 0 0 0-.553-.894L4.329 1.62A.5.5 0 0 1 4 1.173v-2a.5.5 0 0 1 .5-.5zM2 2v1.234l4.276 2.138a1.5 1.5 0 0 0 .694.37V11.26a1.5 1.5 0 0 0-.694.37L2 13.766V2zm12 10.766V2l-4.276 2.138a1.5 1.5 0 0 0-.694.37v7.744a1.5 1.5 0 0 0 .694.37L14 12.766z"/>
+                        </svg>
+                        Filtrar
+                    </button>
                     <a class="btn btn-outline-secondary btn-sm" href="{% url 'dashboard' %}">Limpar</a>
                 </form>
             </div>
@@ -345,7 +399,8 @@
                         data: {
                             labels: labels,
                             datasets: [{ data: data, backgroundColor: ['#28a745', '#6c757d', '#dc3545'] }]
-                        }
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
                     });
                 }
             } catch(e) { console.warn("Erro ao renderizar gráfico de sentimento", e); }
@@ -362,7 +417,8 @@
                         data: {
                             labels: labels,
                             datasets: [{ label: 'Notícias', data: data, backgroundColor: '#ffc107' }]
-                        }
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
                     });
                 }
             } catch(e) { console.warn("Erro ao renderizar gráfico de urgência", e); }
@@ -379,7 +435,8 @@
                         data: {
                             labels: labels,
                             datasets: [{ data: data, backgroundColor: ['#1f5cff', '#ff7a18', '#28a745', '#6f42c1', '#fd7e14'] }]
-                        }
+                        },
+                        options: { responsive: true, maintainAspectRatio: false }
                     });
                 }
             } catch(e) { console.warn("Erro ao renderizar gráfico de categorias", e); }

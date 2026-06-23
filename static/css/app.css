@@ -1,0 +1,81 @@
+:root {
+    color-scheme: light;
+    --app-bg: #f4efe7;
+    --app-text: #172033;
+    --app-muted: #5c667f;
+    --app-accent: #1f5cff;
+    --app-accent-2: #ff7a18;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+    margin: 0;
+    font-family: 'Inter', sans-serif;
+    color: var(--app-text);
+    background:
+        radial-gradient(circle at top left, rgba(31, 92, 255, 0.16), transparent 30%),
+        radial-gradient(circle at top right, rgba(255, 122, 24, 0.14), transparent 24%),
+        linear-gradient(180deg, #faf7f1 0%, #f4efe7 100%);
+    min-height: 100vh;
+    padding-top: 56px;
+}
+
+a { color: inherit; }
+.app-shell { max-width: 1200px; }
+.glass {
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(18px);
+    border: 1px solid rgba(23, 32, 51, 0.12);
+    box-shadow: 0 24px 60px rgba(23, 32, 51, 0.12);
+}
+.soft-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--app-muted);
+}
+.hero-title { letter-spacing: -0.04em; }
+.hero-subtitle { color: var(--app-muted); line-height: 1.7; }
+.fade-in { animation: fadeIn 520ms ease both; }
+.surface { border-radius: 2rem; }
+.text-app-muted { color: var(--app-muted) !important; }
+.text-app-accent { color: var(--app-accent) !important; }
+.bg-app-accent { background-color: var(--app-accent) !important; }
+.border-app-accent { border-color: var(--app-accent) !important; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Navbar */
+.app-navbar {
+    background: rgba(255, 255, 255, 0.82);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid rgba(23, 32, 51, 0.12);
+    box-shadow: 0 1px 12px rgba(23, 32, 51, 0.06);
+}
+.app-navbar .navbar-brand {
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--app-text) !important;
+}
+.app-navbar .nav-link {
+    color: var(--app-muted) !important;
+    font-weight: 500;
+    transition: color 0.15s;
+}
+.app-navbar .nav-link:hover,
+.app-navbar .nav-link.active {
+    color: var(--app-accent) !important;
+}
+
+/* Footer */
+.app-footer {
+    color: var(--app-muted);
+    font-size: 0.8rem;
+}

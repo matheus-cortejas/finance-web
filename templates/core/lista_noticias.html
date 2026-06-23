@@ -11,7 +11,12 @@
             <h1 class="h2 fw-bold hero-title mb-0 mt-2">Todas as Notícias</h1>
             <p class="hero-subtitle mb-0">Notícias processadas, com filtros e ordenação.</p>
         </div>
-        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">← Dashboard</a>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+                <path fill-rule="evenodd" d="M15 8a.5.5 0 0 0-.5-.5H2.707l3.147-3.146a.5.5 0 1 0-.708-.708l-4 4a.5.5 0 0 0 0 .708l4 4a.5.5 0 0 0 .708-.708L2.707 8.5H14.5A.5.5 0 0 0 15 8z"/>
+            </svg>
+            Dashboard
+        </a>
     </div>
 
     <!-- Formulário de filtros -->
@@ -49,7 +54,12 @@
                 </select>
             </div>
             <div class="col-md-2 d-flex align-items-end">
-                <button class="btn btn-primary w-100" type="submit">Filtrar</button>
+                <button class="btn btn-primary w-100" type="submit">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="currentColor" viewBox="0 0 16 16" class="me-1">
+                        <path d="M1.5 1.5A.5.5 0 0 1 2 1h12a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-.276.447l-4.724 2.362a1 1 0 0 0-.553.894v1.084l2.272 1.136a.5.5 0 0 1 0 .894L7.938 13v1.084a1 1 0 0 0 .553.894l4.724 2.362A.5.5 0 0 1 14 17v2a.5.5 0 0 1-.5.5H2a.5.5 0 0 1-.5-.5v-2a.5.5 0 0 1 .276-.447L6.553 12.106a1 1 0 0 0 .553-.894V10.13L4.78 8.994a.5.5 0 0 1 0-.894L9.053 6.856A1 1 0 0 0 9.606 5.96V4.876a1 1 0 0 0-.553-.894L4.329 1.62A.5.5 0 0 1 4 1.173v-2a.5.5 0 0 1 .5-.5zM2 2v1.234l4.276 2.138a1.5 1.5 0 0 0 .694.37V11.26a1.5 1.5 0 0 0-.694.37L2 13.766V2zm12 10.766V2l-4.276 2.138a1.5 1.5 0 0 0-.694.37v7.744a1.5 1.5 0 0 0 .694.37L14 12.766z"/>
+                    </svg>
+                    Filtrar
+                </button>
             </div>
         </form>
     </div>
@@ -57,9 +67,10 @@
     <!-- Listagem de notícias -->
     <div class="glass surface p-4">
         {% if page_obj %}
+            <div class="text-app-muted small mb-3">{{ page_obj.paginator.count }} notícia{{ page_obj.paginator.count|pluralize }} encontrada{{ page_obj.paginator.count|pluralize }}</div>
             <div class="list-group list-group-flush">
                 {% for noticia in page_obj %}
-                    <div class="list-group-item px-0 bg-transparent">
+                    <div class="list-group-item px-0 bg-transparent py-3">
                         <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
                             <div class="flex-grow-1">
                                 <div class="fw-bold">
@@ -93,7 +104,7 @@
                             </div>
                             <div class="text-end">
                                 {% if noticia.score_heuristico %}
-                                    <span class="badge text-bg-light border">Score H: {{ noticia.score_heuristico }}</span>
+                                    <span class="badge {% if noticia.score_heuristico >= 7 %}text-bg-success{% elif noticia.score_heuristico >= 4 %}text-bg-warning{% else %}text-bg-secondary{% endif %}">Score H: {{ noticia.score_heuristico }}</span>
                                 {% endif %}
                             </div>
                         </div>
@@ -119,6 +130,10 @@
             {% endif %}
         {% else %}
             <div class="text-center py-5">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="var(--app-muted)" viewBox="0 0 16 16" class="mb-3">
+                    <path d="M2 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H4z"/>
+                    <path d="M4.5 10a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0-2a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 1-.5-.5zm0-2a.5.5 0 0 1 .5-.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 1-.5-.5z"/>
+                </svg>
                 <h3 class="h5">Nenhuma notícia encontrada</h3>
                 <p class="text-app-muted">Tente ajustar os filtros ou aguarde novas coletas.</p>
             </div>

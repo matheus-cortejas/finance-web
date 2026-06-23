@@ -5,13 +5,27 @@
 
 {% block body %}
 <div class="mb-4 fade-in">
-    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm mb-3">← Voltar para o Dashboard</a>
+    <!-- Breadcrumb -->
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'dashboard' %}" class="text-decoration-none">Dashboard</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'lista_noticias' %}" class="text-decoration-none">Notícias</a></li>
+            <li class="breadcrumb-item active" aria-current="page">{{ noticia.titulo|truncatechars:40|default:"Detalhe" }}</li>
+        </ol>
+    </nav>
+
     <div class="glass surface p-4 p-lg-5">
         <span class="soft-badge">Notícia</span>
         <h1 class="display-6 fw-bold hero-title mt-2">{{ noticia.titulo|default:"Sem título" }}</h1>
         <div class="text-app-muted small mb-3">
             {{ noticia.publicado_em|date:"d/m/Y H:i" }} · 
-            <a href="{{ noticia.link }}" target="_blank" rel="noopener noreferrer">Fonte original ↗</a>
+            <a href="{{ noticia.link }}" target="_blank" rel="noopener noreferrer" class="text-decoration-none">
+                Fonte original
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16" class="ms-1">
+                    <path fill-rule="evenodd" d="M8.636 3.5a.5.5 0 0 0-.5-.5H1.5A1.5 1.5 0 0 0 0 4.5v10A1.5 1.5 0 0 0 1.5 16h10a1.5 1.5 0 0 0 1.5-1.5V7.864a.5.5 0 0 0-1 0V14.5a.5.5 0 0 1-.5.5h-10a.5.5 0 0 1-.5-.5v-10a.5.5 0 0 1 .5-.5h6.636a.5.5 0 0 0 .5-.5z"/>
+                    <path fill-rule="evenodd" d="M16 .5a.5.5 0 0 0-.5-.5h-5a.5.5 0 0 0 0 1h3.793L6.146 9.146a.5.5 0 1 0 .708.708L15 1.707V5.5a.5.5 0 0 0 1 0v-5z"/>
+                </svg>
+            </a>
         </div>
 
         <!-- Resumo / Conteúdo -->
@@ -37,30 +51,30 @@
                 <hr class="my-4">
                 <h3 class="h5 fw-bold">🧠 Classificação Inteligente</h3>
                 <div class="row g-3 mb-3">
-                    <div class="col-md-3">
-                        <div class="p-2 bg-light rounded-3 text-center">
-                            <div class="small text-muted">Sentimento</div>
-                            <div class="fw-bold {% if classificacao.sentimento == 'positivo' %}text-success{% elif classificacao.sentimento == 'negativo' %}text-danger{% else %}text-secondary{% endif %}">
+                    <div class="col-md-3 col-6">
+                        <div class="glass surface p-3 text-center h-100">
+                            <div class="small text-muted mb-1">Sentimento</div>
+                            <div class="fw-bold fs-5 {% if classificacao.sentimento == 'positivo' %}text-success{% elif classificacao.sentimento == 'negativo' %}text-danger{% else %}text-secondary{% endif %}">
                                 {{ classificacao.get_sentimento_display|default:classificacao.sentimento|capfirst }}
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="p-2 bg-light rounded-3 text-center">
-                            <div class="small text-muted">Impacto</div>
-                            <div class="fw-bold">{{ classificacao.get_impacto_display|default:classificacao.impacto|capfirst }}</div>
+                    <div class="col-md-3 col-6">
+                        <div class="glass surface p-3 text-center h-100">
+                            <div class="small text-muted mb-1">Impacto</div>
+                            <div class="fw-bold fs-5">{{ classificacao.get_impacto_display|default:classificacao.impacto|capfirst }}</div>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="p-2 bg-light rounded-3 text-center">
-                            <div class="small text-muted">Urgência</div>
-                            <div class="fw-bold">{{ classificacao.get_urgencia_display|default:classificacao.urgencia|capfirst }}</div>
+                    <div class="col-md-3 col-6">
+                        <div class="glass surface p-3 text-center h-100">
+                            <div class="small text-muted mb-1">Urgência</div>
+                            <div class="fw-bold fs-5">{{ classificacao.get_urgencia_display|default:classificacao.urgencia|capfirst }}</div>
                         </div>
                     </div>
-                    <div class="col-md-3">
-                        <div class="p-2 bg-light rounded-3 text-center">
-                            <div class="small text-muted">Setor / Categoria</div>
-                            <div class="fw-bold">{{ classificacao.setor|default:"Não definido" }}</div>
+                    <div class="col-md-3 col-6">
+                        <div class="glass surface p-3 text-center h-100">
+                            <div class="small text-muted mb-1">Setor / Categoria</div>
+                            <div class="fw-bold fs-5">{{ classificacao.setor|default:"Não definido" }}</div>
                         </div>
                     </div>
                 </div>
@@ -91,12 +105,12 @@
                 {% if classificacao.explicacao %}
                     <div class="mb-3">
                         <strong>💬 Explicação:</strong>
-                        <div class="p-2 bg-light rounded-3">{{ classificacao.explicacao }}</div>
+                        <div class="glass surface p-3 mt-1">{{ classificacao.explicacao }}</div>
                     </div>
                 {% endif %}
 
                 <!-- Metadados de provedor e confiança -->
-                <div class="small text-muted">
+                <div class="small text-muted mt-3">
                     <span>Provedor F4: {{ classificacao.provider_fase4|default:"—" }}</span> |
                     <span>Confiança F4: {{ classificacao.confianca_fase4|default:"—" }}</span> |
                     <span>Provedor Classif.: {{ classificacao.provider|default:"—" }}</span> |
@@ -110,14 +124,14 @@
             <hr>
             <div class="row g-3">
                 <div class="col-md-6">
-                    <div class="p-3 rounded-4 bg-white border text-center">
+                    <div class="glass surface p-3 text-center h-100">
                         <div class="text-muted small">Score personalizado</div>
                         <div class="display-6 fw-bold">{{ score.score_final|floatformat:2 }}</div>
                         <span class="badge {{ score.badge_class }}">{{ score.get_prioridade_display }}</span>
                     </div>
                 </div>
                 <div class="col-md-6">
-                    <div class="p-3 rounded-4 bg-white border">
+                    <div class="glass surface p-3">
                         <div class="text-muted small">Detalhes do cálculo</div>
                         <div class="small">
                             {% for key, value in score.motivos.items %}
