@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}Criar Conta | Monitor Financeiro{% endblock %}
+
+{% block body %}
+<div class="row justify-content-center align-items-center fade-in" style="min-height: calc(100vh - 160px);">
+    <div class="col-12 col-lg-5 col-md-6">
+        <div class="glass surface p-4 p-lg-5">
+            <div class="text-center mb-4">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="var(--app-accent)" viewBox="0 0 16 16" class="mb-3">
+                    <path d="M8 1a2 2 0 0 1 2 2v4H6V3a2 2 0 0 1 2-2zm3 6V3a3 3 0 0 0-6 0v4a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/>
+                    <path fill="var(--app-accent)" d="M8.5 12.5a.5.5 0 0 1-1 0V11a.5.5 0 0 1 1 0v1.5zm0-3a.5.5 0 0 1-1 0V10a.5.5 0 0 1 1 0v-.5z"/>
+                </svg>
+                <span class="soft-badge">Nova conta</span>
+                <h1 class="display-6 fw-bold hero-title mt-2">Comece a monitorar seus investimentos.</h1>
+                <p class="hero-subtitle mt-2 mb-0">Preencha os dados para criar sua conta e acessar o dashboard.</p>
+            </div>
+
+            {% if form.errors %}
+                <div class="alert alert-danger d-flex align-items-center gap-2" role="alert">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" class="flex-shrink-0">
+                        <path d="M8.982 1.566a1.13 1.13 0 0 0-1.96 0L.165 13.233c-.457.778.091 1.767.98 1.767h13.713c.889 0 1.438-.99.98-1.767L8.982 1.566zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 0 1-1.1 0L7.1 5.995A.905.905 0 0 1 8 5zm.002 6a1 1 0 1 1 0 2 1 1 0 0 1 0-2z"/>
+                    </svg>
+                    <div>Verifique os campos abaixo.</div>
+                </div>
+            {% endif %}
+
+            <form method="post" class="mt-4">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label fw-medium" for="id_username">Usuário</label>
+                    <input class="form-control form-control-lg" type="text" name="username" id="id_username" autofocus autocomplete="username" placeholder="Digite seu usuário" value="{{ form.username.value|default:'' }}">
+                    {% if form.username.errors %}
+                        <div class="text-danger small mt-1">{% for error in form.username.errors %}{{ error }}{% endfor %}</div>
+                    {% endif %}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-medium" for="id_email">E-mail</label>
+                    <input class="form-control form-control-lg" type="email" name="email" id="id_email" autocomplete="email" placeholder="Digite seu e-mail" value="{{ form.email.value|default:'' }}">
+                    {% if form.email.errors %}
+                        <div class="text-danger small mt-1">{% for error in form.email.errors %}{{ error }}{% endfor %}</div>
+                    {% endif %}
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-medium" for="id_password1">Senha</label>
+                    <input class="form-control form-control-lg" type="password" name="password1" id="id_password1" autocomplete="new-password" placeholder="Digite sua senha">
+                    {% if form.password1.errors %}
+                        <div class="text-danger small mt-1">{% for error in form.password1.errors %}{{ error }}{% endfor %}</div>
+                    {% endif %}
+                    {% if form.password1.help_text %}
+                        <div class="form-text small text-muted">{{ form.password1.help_text|safe }}</div>
+                    {% endif %}
+                </div>
+                <div class="mb-4">
+                    <label class="form-label fw-medium" for="id_password2">Confirmação da senha</label>
+                    <input class="form-control form-control-lg" type="password" name="password2" id="id_password2" autocomplete="new-password" placeholder="Confirme sua senha">
+                    {% if form.password2.errors %}
+                        <div class="text-danger small mt-1">{% for error in form.password2.errors %}{{ error }}{% endfor %}</div>
+                    {% endif %}
+                </div>
+                <button class="btn btn-primary btn-lg w-100" type="submit">Criar conta</button>
+            </form>
+
+            <div class="text-center mt-4">
+                <span class="text-muted">Já tem conta?</span>
+                <a href="{% url 'login' %}" class="fw-semibold">Faça login</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

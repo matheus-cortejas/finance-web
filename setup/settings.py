@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "core.apps.CoreConfig",
+    "pipeline_lab.apps.PipelineLabConfig",
 ]
 
 MIDDLEWARE = [

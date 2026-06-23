@@ -3,7 +3,8 @@ from __future__ import annotations
 from django import forms
 
 from core.models import PerfilInvestidor
-
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
 
 class PerfilInvestidorForm(forms.ModelForm):
     setores_preferidos_text = forms.CharField(
@@ -60,3 +61,31 @@ class PerfilInvestidorForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+    
+class RegistroForm(UserCreationForm):
+    email = forms.EmailField(
+        required=True,
+        help_text="Informe um e-mail válido.",
+        widget=forms.EmailInput(attrs={"class": "form-control form-control-lg", "placeholder": "Digite seu e-mail"})
+    )
+
+    class Meta:
+        model = User
+        fields = ("username", "email", "password1", "password2")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Estiliza os campos automáticos
+        self.fields["username"].widget.attrs.update({
+            "class": "form-control form-control-lg",
+            "placeholder": "Digite seu usuário",
+            "autofocus": True,
+        })
+        self.fields["password1"].widget.attrs.update({
+            "class": "form-control form-control-lg",
+            "placeholder": "Digite sua senha",
+        })
+        self.fields["password2"].widget.attrs.update({
+            "class": "form-control form-control-lg",
+            "placeholder": "Confirme sua senha",
+        })    

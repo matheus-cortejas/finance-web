@@ -11,6 +11,8 @@ from django.shortcuts import redirect, render, get_object_or_404
 from django.core.paginator import Paginator
 from django.db.models import OuterRef, Subquery
 from requests import request
+from .forms import RegistroForm
+
 
 from core.forms import PerfilInvestidorForm
 from core.models import (
@@ -494,3 +496,13 @@ def meus_alertas(request):
         },
     }
     return render(request, 'core/meus_alertas.html', context)
+
+def register(request):
+    if request.method == 'POST':
+        form = RegistroForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('login')  # redireciona para a página de login
+    else:
+        form = RegistroForm()
+    return render(request, 'core/register.html', {'form': form})
