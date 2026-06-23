@@ -111,15 +111,11 @@ def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
     Coleta feeds, processa usando o pipeline inteligente e gera alertas.
     O parâmetro watch_assets é ignorado (mantido apenas para compatibilidade com chamadas antigas).
     """
-    # Inicializa o pipeline (carrega modelo, cache, etc.)
-    # A primeira chamada ao processar_noticia_completa já fará a inicialização lazy,
-    # mas podemos forçar a inicialização dos singletons se desejar.
-    config = load_global_config()  # garante que a config seja carregada
+    config = load_global_config()
 
-    # Carrega todos os tickers para usar como carteira padrão na fase 2
     all_tickers = _get_all_tickers()
     if not all_tickers:
-        logger.warning("Nenhum ativo cadastrado para monitoramento. O pipeline não encontrará tickers relacionados.")
+        logger.warning("Nenhum ativo cadastrado para monitoramento.")
         all_tickers = []
 
     cutoff = None
@@ -138,16 +134,15 @@ def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
         for entry in entries:
             published = _parse_date(entry)
             if cutoff and published < cutoff:
-                logger.debug("Ignorando artigo antigo: %s", entry.get("link") or entry.get("title") or "sem-link")
+                logger.debug("Ignorando artigo antigo")
                 continue
 
             raw_link = entry.get("link") or entry.get("id") or ""
             link = _normalize_link(raw_link)
             if not link or seen_article(link):
-                logger.debug("Ignorando artigo já visto ou sem link: %s", link or entry.get("title") or "sem-link")
+                logger.debug("Ignorando artigo já visto ou sem link")
                 continue
 
-            # Extrai texto limpo (os parsers já retornam texto sem HTML)
             title = (entry.get("title") or "").strip()
             description_full = (entry.get("description") or "").strip()
             content_full = (entry.get("content") or "").strip()
@@ -157,7 +152,6 @@ def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
             description = description_full[:settings.ARTICLE_DESCRIPTION_MAX_CHARS] if description_full else ""
             content = content_full[:settings.ARTICLE_CONTENT_MAX_CHARS] if content_full else ""
 
-            # Monta dicionário para o pipeline
             noticia_dict = {
                 "id": None,
                 "titulo": title,
@@ -167,64 +161,55 @@ def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
             }
 
             try:
-                # Executa pipeline (fases 1 a 5)
                 pipeline_result = processar_noticia_completa(
                     noticia=noticia_dict,
                     carteira_usuario=all_tickers,
                 )
             except Exception as e:
-                logger.exception("Erro no pipeline para notícia %s: %s", title, e)
+                logger.exception("Erro no pipeline para %s: %s", title, e)
                 continue
 
-            # Persiste a notícia no banco (mesmo se irrelevante)
             raw_data = _safe_raw_data(entry.get("raw"))
             published_ts = int(published.timestamp())
             article = _save_article_with_pipeline_result(
-                link=link,
-                title=title,
-                description=description,
-                content=content,
-                published_ts=published_ts,
-                feed_url=feed_url,
-                raw_data=raw_data,
+                link=link, title=title, description=description,
+                content=content, published_ts=published_ts,
+                feed_url=feed_url, raw_data=raw_data,
                 pipeline_result=pipeline_result,
             )
             if not article:
                 continue
 
-            # Se a notícia não for relevante, não geramos alertas
             if not pipeline_result.get("relevancia_binaria"):
-                logger.info("Notícia irrelevante (relevancia_binaria=0): %s", title)
+                logger.info("Notícia irrelevante: %s", title)
                 continue
 
             tickers_relacionados = pipeline_result.get("tickers_relacionados", [])
             if not tickers_relacionados:
-                logger.info("Nenhum ticker relacionado para notícia relevante: %s", title)
-                # Ainda assim, podemos notificar por categoria? (opcional)
-                # Por ora, não geramos alertas.
+                logger.info("Nenhum ticker relacionado: %s", title)
                 continue
 
-            # IDs dos ativos correspondentes
             asset_ids = list(Ativo.objects.filter(ticker__in=tickers_relacionados).values_list('id', flat=True))
             if not asset_ids:
                 logger.info("Nenhum ativo cadastrado para os tickers relacionados: %s", tickers_relacionados)
                 continue
 
-            # Usuários que possuem esses ativos em suas carteiras
+            # Usuários que possuem pelo menos um dos ativos
             carteiras = Carteira.objects.filter(ativos__in=asset_ids).distinct()
-            perfis = {p.usuario_id: p for p in PerfilInvestidor.objects.filter(usuario__in=[c.usuario_id for c in carteiras])}
+            perfis = {p.usuario_id: p for p in PerfilInvestidor.objects.filter(
+                usuario__in=[c.usuario_id for c in carteiras]
+            )}
 
             for carteira in carteiras:
                 usuario = carteira.usuario
                 perfil = perfis.get(usuario.id)
                 perfil_dict = _convert_perfil(perfil) if perfil else None
 
-                # Fase 6 – decisão personalizada por usuário
+                # Fase 6
                 try:
                     decision = decidir_alerta(
                         noticia=pipeline_result,
                         perfil=perfil_dict,
-                        config=None,  # usa a config global (carregada internamente)
                     )
                 except Exception as e:
                     logger.exception("Erro na fase 6 para usuário %s: %s", usuario.id, e)
@@ -235,7 +220,7 @@ def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
                 score_final = decision.get("score_final", 0.0)
                 explicacao_regra = decision.get("explicacao_regra", "")
 
-                # Salva o score personalizado
+                # Salva score personalizado
                 NoticiaScore.objects.update_or_create(
                     noticia=article,
                     usuario=usuario,
@@ -246,19 +231,32 @@ def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
                     },
                 )
 
-                # Verifica prioridade mínima para gerar alerta
                 min_priority = getattr(settings, "ALERT_MIN_PRIORITY", "media")
                 if perfil and hasattr(perfil, "alerta_min_prioridade"):
                     min_priority = perfil.alerta_min_prioridade
 
                 if is_priority_at_least(prioridade, min_priority):
-                    # Ativos do usuário que estão na lista de relacionados
-                    user_assets = Ativo.objects.filter(carteiras__usuario=usuario, id__in=asset_ids)
-                    for asset in user_assets:
-                        Alerta.objects.get_or_create(usuario=usuario, noticia=article, ativo=asset)
-                        logger.info("Alerta criado: noticia_id=%s usuario_id=%s ativo_id=%s", article.id, usuario.id, asset.id)
+                    user_assets = Ativo.objects.filter(
+                        carteiras__usuario=usuario,
+                        id__in=asset_ids
+                    )
 
-            # Relatório (para compatibilidade com a saída antiga)
+                    # Cria um único alerta por (usuário, notícia)
+                    alerta, created = Alerta.objects.get_or_create(
+                        usuario=usuario,
+                        noticia=article
+                    )
+                    # Associa todos os ativos da carteira que aparecem na notícia
+                    if user_assets.exists():
+                        alerta.ativos.add(*user_assets)
+                        logger.info(
+                            "Alerta %s: noticia_id=%s usuario_id=%s ativos=%s",
+                            "criado" if created else "já existia",
+                            article.id,
+                            usuario.id,
+                            list(user_assets.values_list('ticker', flat=True))
+                        )
+
             reports.append({
                 "published": published.isoformat(),
                 "title": title,

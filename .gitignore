@@ -5,3 +5,5 @@ venv
 *.log
 *.pyc
 __pycache__/
+core/intelligent_motor/fase1_global_filter/fase1_cache.sqlite
+core/intelligent_motor/models/

@@ -38,8 +38,11 @@ class NoticiaAdmin(admin.ModelAdmin):
 
 @admin.register(Alerta)
 class AlertaAdmin(admin.ModelAdmin):
-	list_display = ("usuario", "ativo", "noticia", "created_at")
-	search_fields = ("usuario__username", "ativo__ticker", "noticia__titulo")
+    list_display = ['usuario', 'tickers_list', 'noticia', 'created_at']
+
+    def tickers_list(self, obj):
+        return ", ".join(obj.ativos.values_list('ticker', flat=True))
+    tickers_list.short_description = "Ativos"
 
 
 @admin.register(PerfilInvestidor)

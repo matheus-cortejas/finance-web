@@ -10,6 +10,7 @@ from django.http import JsonResponse
 from django.shortcuts import redirect, render, get_object_or_404
 from django.core.paginator import Paginator
 from django.db.models import OuterRef, Subquery
+from requests import request
 
 from core.forms import PerfilInvestidorForm
 from core.models import (
@@ -157,13 +158,19 @@ def dashboard(request):
 
     # Tendências (tickers mais mencionados nos alertas dos últimos 7 dias)
     semana_atras = timezone.now() - timedelta(days=7)
-    tickers_tendencia = (
-        Alerta.objects.filter(usuario=request.user, created_at__gte=semana_atras)
-        .values('ativo__ticker')
-        .annotate(total=Count('id'))
-        .order_by('-total')[:5]
-    )
-    tendencia_tickers = [t['ativo__ticker'] for t in tickers_tendencia]
+    alertas_semana = Alerta.objects.filter(
+        usuario=request.user, created_at__gte=semana_atras
+    ).prefetch_related('ativos')
+
+    contador = {}
+    for alerta in alertas_semana:
+        for ativo in alerta.ativos.all():
+            ticker = ativo.ticker
+            contador[ticker] = contador.get(ticker, 0) + 1
+
+    # Top 5 tickers mais frequentes
+    tendencia_tickers = sorted(contador.items(), key=lambda x: x[1], reverse=True)[:5]
+    tendencia_tickers = [t[0] for t in tendencia_tickers]
 
     # ========== PROCESSAMENTO POST ==========
     if request.method == "POST":
@@ -219,10 +226,19 @@ def dashboard(request):
                 logger.warning("Envio vazio de ativo na dashboard: user=%s", request.user.username)
                 messages.warning(request, "Informe um código ou nome de ativo.")
 
-    portfolio_assets = list(carteira.ativos.order_by("ticker"))
+    # Queryset completa (usada para métricas e total)
+    all_assets = carteira.ativos.order_by("ticker")
+    portfolio_assets = all_assets   # mantém para a métrica 'Ativos na carteira'
+
+    # Paginação: 20 ativos por página
+    paginator = Paginator(all_assets, 20)
+    page_number = request.GET.get('ativos_page', 1)
+    ativos_paginados = paginator.get_page(page_number)
+
     recent_alerts = list(
         Alerta.objects.filter(usuario=request.user)
-        .select_related("ativo", "noticia", "noticia__classificacao")
+        .prefetch_related('ativos')
+        .select_related("noticia", "noticia__classificacao")
         .order_by("-created_at")[:8]
     )
 
@@ -306,6 +322,7 @@ def dashboard(request):
         {
             "carteira": carteira,
             "portfolio_assets": portfolio_assets,
+            "ativos_paginados": ativos_paginados,
             "recent_alerts": recent_alerts,
             "asset_matches": asset_matches,
             "perfil_form": perfil_form,
@@ -447,16 +464,22 @@ def detalhe_noticia(request, noticia_id):
 # meus_alertas (autenticada)
 @login_required
 def meus_alertas(request):
-    alertas = Alerta.objects.filter(usuario=request.user).select_related('noticia', 'ativo', 'noticia__classificacao').order_by('-created_at')
+    alertas = Alerta.objects.filter(usuario=request.user)\
+        .select_related('noticia', 'noticia__classificacao')\
+        .prefetch_related('ativos')\
+        .order_by('-created_at')
 
     # Filtros
     prioridade = request.GET.get('prioridade', '').strip()
     ticker = request.GET.get('ticker', '').strip().upper()
 
     if prioridade:
-        alertas = alertas.filter(noticia__scores__prioridade=prioridade, noticia__scores__usuario=request.user)
+        alertas = alertas.filter(
+            noticia__scores__prioridade=prioridade,
+            noticia__scores__usuario=request.user
+        )
     if ticker:
-        alertas = alertas.filter(ativo__ticker__icontains=ticker)
+        alertas = alertas.filter(ativos__ticker__icontains=ticker).distinct()
 
     # Paginação
     paginator = Paginator(alertas, 15)

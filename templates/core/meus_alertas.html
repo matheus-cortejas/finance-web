@@ -48,7 +48,7 @@
                             <div class="flex-grow-1">
                                 <div class="fw-bold">
                                     <a href="{% url 'detalhe_noticia' alerta.noticia.id %}" class="text-decoration-none text-reset" data-interaction-open data-noticia-id="{{ alerta.noticia.id }}">
-                                        {{ alerta.ativo.ticker }} · {{ alerta.noticia.titulo|default:alerta.noticia.link }}
+                                        {{ alerta.ticker }} · {{ alerta.noticia.titulo|default:alerta.noticia.link }}
                                     </a>
                                 </div>
                                 <div class="text-app-muted small mb-1">

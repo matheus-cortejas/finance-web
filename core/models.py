@@ -197,16 +197,25 @@ class FonteRSS(models.Model):
 
 
 class Alerta(models.Model):
-	usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="alertas")
-	noticia = models.ForeignKey(Noticia, on_delete=models.CASCADE, related_name="alertas")
-	ativo = models.ForeignKey(Ativo, on_delete=models.CASCADE, related_name="alertas")
-	created_at = models.DateTimeField(auto_now_add=True)
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="alertas")
+    noticia = models.ForeignKey(Noticia, on_delete=models.CASCADE, related_name="alertas")
+    ativos = models.ManyToManyField(Ativo, related_name="alertas")   # ← relaciona vários ativos
+    created_at = models.DateTimeField(auto_now_add=True)
 
-	class Meta:
-		constraints = [
-			models.UniqueConstraint(fields=["usuario", "noticia", "ativo"], name="unique_alerta_por_usuario_noticia_ativo"),
-		]
-		ordering = ["-created_at"]
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["usuario", "noticia"],
+                name="unique_alerta_por_usuario_noticia"
+            ),
+        ]
+        ordering = ["-created_at"]
 
-	def __str__(self) -> str:
-		return f"{self.usuario.username}: {self.ativo.ticker} -> {self.noticia.link}"
+    def __str__(self):
+        return f"{self.usuario.username}: {self.noticia_id}"
+
+    @property
+    def ticker(self):
+        """Retorna o ticker do primeiro ativo associado ao alerta, ou string vazia se não houver."""
+        primeiro = self.ativos.first()
+        return primeiro.ticker if primeiro else ""

@@ -97,7 +97,7 @@ def _carregar_mapa_tickers() -> Dict[str, str]:
 
         mapa: Dict[str, str] = {}
         try:
-            from .models import Ativo  # import tardio: evita custo/erro fora do Django
+            from ..models import Ativo  # import tardio: evita custo/erro fora do Django
 
             for ticker, source in Ativo.objects.values_list("ticker", "source"):
                 mapa[ticker] = (source or "").strip().lower()

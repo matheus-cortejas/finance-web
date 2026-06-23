@@ -101,11 +101,12 @@
 
 <!-- Carteira + Perfil (lado a lado) -->
 <div class="row g-4 fade-in">
+    <!-- Coluna da Carteira -->
     <div class="col-lg-5">
-        <div class="glass surface p-4 h-100">
+        <div class="glass surface p-4 h-100 d-flex flex-column">
             <h2 class="h4 fw-bold">📌 Carteira</h2>
-            <div class="list-group list-group-flush mt-3">
-                {% for asset in portfolio_assets %}
+            <div class="list-group list-group-flush mt-3 flex-grow-1">
+                {% for asset in ativos_paginados %}
                     <div class="list-group-item px-0 bg-transparent d-flex justify-content-between align-items-center">
                         <div>
                             <div class="fw-bold">{{ asset.ticker }}</div>
@@ -133,9 +134,35 @@
                     <div id="asset-suggestions" class="list-group mt-2 d-none"></div>
                 </div>
             </div>
+
+            <!-- Paginação dentro do card, no final -->
+            {% if ativos_paginados.has_other_pages %}
+            <nav class="mt-auto pt-3">
+                <ul class="pagination pagination-sm justify-content-center mb-0">
+                    {% if ativos_paginados.has_previous %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'ativos_page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}ativos_page=1">&laquo;</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'ativos_page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}ativos_page={{ ativos_paginados.previous_page_number }}">‹</a>
+                        </li>
+                    {% endif %}
+                    <li class="page-item disabled">
+                        <span class="page-link">{{ ativos_paginados.number }}/{{ ativos_paginados.paginator.num_pages }}</span>
+                    </li>
+                    {% if ativos_paginados.has_next %}
+                        <li class="page-item">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'ativos_page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}ativos_page={{ ativos_paginados.next_page_number }}">›</a>
+                        </li>
+                        <li class="page-item">
+                            <a class="page-link" href="?{% for key, value in request.GET.items %}{% if key != 'ativos_page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}ativos_page={{ ativos_paginados.paginator.num_pages }}">&raquo;</a>
+                        </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
         </div>
     </div>
-
     <div class="col-lg-7">
         <div class="glass surface p-4 h-100">
             <h2 class="h4 fw-bold">⚙️ Perfil do investidor</h2>
@@ -188,7 +215,7 @@
                             <div>
                                 <div class="fw-bold">
                                     <a href="{% url 'detalhe_noticia' alert.noticia.id %}" class="text-decoration-none text-reset fw-bold" data-interaction-open data-noticia-id="{{ alert.noticia.id }}">
-                                        {{ alert.ativo.ticker }} · {{ alert.noticia.titulo|default:alert.noticia.link }}
+                                        {{ alert.ticker }} · {{ alert.noticia.titulo|default:alert.noticia.link }}
                                     </a>
                                 </div>
                                 <div class="text-app-muted small">{{ alert.noticia.publicado_em|date:"d/m/Y H:i" }}</div>
