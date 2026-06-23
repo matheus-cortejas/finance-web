@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+
+{% block title %}Pipeline Lab | Monitor Financeiro{% endblock %}
+
+{% block body %}
+<div class="fade-in">
+    <div class="mb-4">
+        <span class="soft-badge">Ferramenta de teste</span>
+        <h1 class="h2 fw-bold hero-title mb-0 mt-2">Pipeline Lab</h1>
+        <p class="hero-subtitle mb-0">Teste manual do motor inteligente fase a fase. Nenhum dado é persistido no banco.</p>
+    </div>
+
+    {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+    {% endif %}
+
+    <!-- Formulário de entrada -->
+    <div class="glass surface p-4 mb-4">
+        <h2 class="h5 fw-bold mb-3">Notícia de teste</h2>
+        <form method="post">
+            {% csrf_token %}
+            <div class="row g-3">
+                <div class="col-12">
+                    <label class="form-label small fw-medium" for="id_titulo">Título *</label>
+                    <input type="text" class="form-control" id="id_titulo" name="titulo"
+                           value="{{ form_data.titulo|default:'' }}"
+                           placeholder="Ex.: Petrobras anuncia prejuízo de R$ 5 bilhões no Q3" required>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small fw-medium" for="id_descricao">Descrição</label>
+                    <textarea class="form-control" id="id_descricao" name="descricao" rows="3"
+                              placeholder="Resumo curto da notícia...">{{ form_data.descricao|default:'' }}</textarea>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small fw-medium" for="id_conteudo">Conteúdo</label>
+                    <textarea class="form-control" id="id_conteudo" name="conteudo" rows="5"
+                              placeholder="Texto completo da notícia (opcional)...">{{ form_data.conteudo|default:'' }}</textarea>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label small fw-medium" for="id_link">Link</label>
+                    <input type="url" class="form-control" id="id_link" name="link"
+                           value="{{ form_data.link|default:'' }}"
+                           placeholder="https://exemplo.com/noticia">
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <button class="btn btn-primary w-100" type="submit">Executar Pipeline</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    {% if result %}
+    <!-- Resultados -->
+    <div class="glass surface p-4 mb-4">
+        <h2 class="h5 fw-bold mb-3">Resultados do Pipeline</h2>
+
+        <!-- Fase 1 -->
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#fase1" role="button" style="cursor:pointer;">
+                <span class="fw-bold">Fase 1 — Relevância Global</span>
+                {% if result.relevancia_global %}
+                    <span class="badge text-bg-success">Aprovada</span>
+                {% else %}
+                    <span class="badge text-bg-danger">Rejeitada</span>
+                {% endif %}
+            </div>
+            <div id="fase1" class="collapse show">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <div class="text-muted small">Score de relevância</div>
+                            <div class="fw-bold fs-5">{{ result.relevancia_global|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-muted small">Relevância binária</div>
+                            <div class="fw-bold fs-5">{{ result.relevancia_binaria|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-muted small">Embedding gerado</div>
+                            <div class="fw-bold fs-5">{% if result.embedding_noticia %}Sim{% else %}Não{% endif %}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {% if result.relevancia_binaria == 1 %}
+        <!-- Fase 2 -->
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#fase2" role="button" style="cursor:pointer;">
+                <span class="fw-bold">Fase 2 — Tickers Relacionados</span>
+                <span class="badge text-bg-info">{{ result.tickers_relacionados|length }} encontrado{{ result.tickers_relacionados|length|pluralize }}</span>
+            </div>
+            <div id="fase2" class="collapse show">
+                <div class="card-body">
+                    {% if result.tickers_relacionados %}
+                        <div class="d-flex flex-wrap gap-2">
+                            {% for ticker in result.tickers_relacionados %}
+                                <span class="badge bg-primary p-2">{{ ticker }}</span>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="text-muted">Nenhum ticker relacionado encontrado.</div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Fase 3 -->
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#fase3" role="button" style="cursor:pointer;">
+                <span class="fw-bold">Fase 3 — Heurística</span>
+                <span class="badge text-bg-warning">Score: {{ result.score_heuristico|default:"0" }}</span>
+            </div>
+            <div id="fase3" class="collapse show">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="text-muted small">Score heurístico</div>
+                            <div class="fw-bold fs-5">{{ result.score_heuristico|default:"0" }}</div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="text-muted small">Critérios ativados</div>
+                            <div class="fw-bold">
+                                {% if result.criterios_ativados %}
+                                    {% for criterio in result.criterios_ativados %}
+                                        <span class="badge text-bg-light border me-1">{{ criterio }}</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span class="text-muted">Nenhum</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% if result.tickers_encontrados %}
+                    <div class="mt-2">
+                        <div class="text-muted small">Tickers encontrados (regex)</div>
+                        <div class="fw-bold">
+                            {% for t in result.tickers_encontrados %}
+                                <span class="badge bg-primary p-2">{{ t }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Fase 4 -->
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#fase4" role="button" style="cursor:pointer;">
+                <span class="fw-bold">Fase 4 — LLM Gate</span>
+                {% if result.relevancia_binaria == 1 %}
+                    <span class="badge text-bg-success">Aprovada</span>
+                {% else %}
+                    <span class="badge text-bg-danger">Rejeitada</span>
+                {% endif %}
+            </div>
+            <div id="fase4" class="collapse show">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <div class="text-muted small">Decisão</div>
+                            <div class="fw-bold fs-5">{{ result.relevancia_binaria|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Confiança</div>
+                            <div class="fw-bold fs-5">{{ result.confianca_fase4|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Provider</div>
+                            <div class="fw-bold">{{ result.provider_fase4|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Status</div>
+                            <div class="fw-bold">{{ result.status_fase4|default:"—" }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Fase 5 -->
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#fase5" role="button" style="cursor:pointer;">
+                <span class="fw-bold">Fase 5 — Classificação Rica</span>
+                <span class="badge text-bg-secondary">{{ result.categoria|default:"—" }}</span>
+            </div>
+            <div id="fase5" class="collapse show">
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <div class="text-muted small">Sentimento</div>
+                            <div class="fw-bold fs-5 {% if result.sentimento == 'positivo' %}text-success{% elif result.sentimento == 'negativo' %}text-danger{% else %}text-secondary{% endif %}">
+                                {{ result.sentimento|default:"—" }}
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Impacto</div>
+                            <div class="fw-bold fs-5">{{ result.impacto|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Urgência</div>
+                            <div class="fw-bold fs-5">{{ result.urgencia|default:"—" }}</div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="text-muted small">Categoria</div>
+                            <div class="fw-bold fs-5">{{ result.categoria|default:"—" }}</div>
+                        </div>
+                    </div>
+                    {% if result.explicacao %}
+                    <div class="mt-3">
+                        <div class="text-muted small">Explicação</div>
+                        <div class="glass surface p-2 mt-1">{{ result.explicacao }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Fase 6 — Simulação de Alertas -->
+        <div class="card mb-3 border-0 shadow-sm">
+            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
+                 data-bs-toggle="collapse" data-bs-target="#fase6" role="button" style="cursor:pointer;">
+                <span class="fw-bold">Fase 6 — Simulação de Alertas</span>
+                <span class="badge text-bg-primary">{{ alertas_simulados.alertariam|length }} alertaria{{ alertas_simulados.alertariam|length|pluralize }}</span>
+            </div>
+            <div id="fase6" class="collapse show">
+                <div class="card-body">
+                    {% if alertas_simulados.alertariam %}
+                    <h6 class="fw-bold text-success mb-2">Usuários que receberiam alerta</h6>
+                    <div class="table-responsive mb-4">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Usuário</th>
+                                    <th>Tickers</th>
+                                    <th>Prioridade</th>
+                                    <th>Score</th>
+                                    <th>Ações</th>
+                                    <th>Explicação</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in alertas_simulados.alertariam %}
+                                <tr>
+                                    <td class="fw-bold">{{ item.username }}</td>
+                                    <td>
+                                        {% for t in item.tickers_casaram %}
+                                            <span class="badge bg-primary p-2">{{ t }}</span>
+                                        {% endfor %}
+                                    </td>
+                                    <td>
+                                        <span class="badge {% if item.prioridade == 'critica' %}text-bg-danger{% elif item.prioridade == 'alta' %}text-bg-warning{% elif item.prioridade == 'media' %}text-bg-info{% else %}text-bg-secondary{% endif %}">
+                                            {{ item.prioridade }}
+                                        </span>
+                                    </td>
+                                    <td>{{ item.score_final|floatformat:2 }}</td>
+                                    <td>
+                                        {% for a in item.acoes %}
+                                            <span class="badge text-bg-light border">{{ a }}</span>
+                                        {% endfor %}
+                                    </td>
+                                    <td class="text-muted small">{{ item.explicacao }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-muted mb-3">Nenhum usuário receberia alerta.</div>
+                    {% endif %}
+
+                    {% if alertas_simulados.nao_alertariam %}
+                    <h6 class="fw-bold text-muted mb-2">Usuários que NÃO receberiam alerta</h6>
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th>Usuário</th>
+                                    <th>Motivo</th>
+                                    <th>Tickers casaram</th>
+                                    <th>Carteira</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for item in alertas_simulados.nao_alertariam %}
+                                <tr>
+                                    <td>{{ item.username }}</td>
+                                    <td class="text-muted">{{ item.motivo }}</td>
+                                    <td>
+                                        {% if item.tickers_casaram %}
+                                            {% for t in item.tickers_casaram %}
+                                                <span class="badge text-bg-light border">{{ t }}</span>
+                                            {% endfor %}
+                                        {% else %}
+                                            <span class="text-muted">—</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="text-muted small">
+                                        {% if item.carteira %}
+                                            {{ item.carteira|join:", " }}
+                                        {% else %}
+                                            —
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Tempos de execução -->
+    <div class="glass surface p-3 mb-4">
+        <div class="d-flex flex-wrap gap-4 text-muted small">
+            <span>Pipeline: <strong>{{ t_pipeline }}s</strong></span>
+            <span>Alertas: <strong>{{ t_alertas }}s</strong></span>
+            <span>Total: <strong>{{ t_pipeline|add:t_alertas }}s</strong></span>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
