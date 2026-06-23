@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Todas as Notícias | Monitor Financeiro{% endblock %}
+
+{% block body %}
+<div class="fade-in">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <div>
+            <span class="soft-badge">Arquivo</span>
+            <h1 class="h2 fw-bold hero-title mb-0 mt-2">Todas as Notícias</h1>
+            <p class="hero-subtitle mb-0">Notícias processadas, com filtros e ordenação.</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">← Dashboard</a>
+    </div>
+
+    <!-- Formulário de filtros -->
+    <div class="glass surface p-4 mb-4">
+        <form method="get" action="{% url 'lista_noticias' %}" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label small">Categoria (Setor)</label>
+                <select name="categoria" class="form-select">
+                    <option value="">Todas</option>
+                    {% for cat in categorias_disponiveis %}
+                        <option value="{{ cat }}" {% if cat == filtros.categoria %}selected{% endif %}>{{ cat|capfirst }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Sentimento</label>
+                <select name="sentimento" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="positivo" {% if filtros.sentimento == 'positivo' %}selected{% endif %}>Positivo</option>
+                    <option value="neutro" {% if filtros.sentimento == 'neutro' %}selected{% endif %}>Neutro</option>
+                    <option value="negativo" {% if filtros.sentimento == 'negativo' %}selected{% endif %}>Negativo</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Ticker relacionado</label>
+                <input type="text" name="ticker" class="form-control" placeholder="Ex.: PETR4" value="{{ filtros.ticker }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Ordenar por</label>
+                <select name="ordem" class="form-select">
+                    <option value="-publicado_em" {% if filtros.ordem == '-publicado_em' %}selected{% endif %}>Mais recentes</option>
+                    <option value="publicado_em" {% if filtros.ordem == 'publicado_em' %}selected{% endif %}>Mais antigas</option>
+                    <option value="-score_final" {% if filtros.ordem == '-score_final' %}selected{% endif %}>Maior score</option>
+                    <option value="-score_heuristico" {% if filtros.ordem == '-score_heuristico' %}selected{% endif %}>Maior score heurístico</option>
+                </select>
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-primary w-100" type="submit">Filtrar</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Listagem de notícias -->
+    <div class="glass surface p-4">
+        {% if page_obj %}
+            <div class="list-group list-group-flush">
+                {% for noticia in page_obj %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">
+                                    <a href="{% url 'detalhe_noticia' noticia.id %}" class="text-decoration-none text-reset">
+                                        {{ noticia.titulo|default:"Sem título" }}
+                                    </a>
+                                </div>
+                                <div class="text-app-muted small mb-1">
+                                    {{ noticia.publicado_em|date:"d/m/Y H:i" }}
+                                </div>
+                                {% with classificacao=noticia.classificacao %}
+                                    {% if classificacao %}
+                                        <div class="d-flex flex-wrap gap-2 mb-2">
+                                            <span class="badge {% if classificacao.sentimento == 'positivo' %}text-bg-success{% elif classificacao.sentimento == 'negativo' %}text-bg-danger{% else %}text-bg-secondary{% endif %}">
+                                                {{ classificacao.get_sentimento_display|default:classificacao.sentimento }}
+                                            </span>
+                                            <span class="badge text-bg-light border">Impacto {{ classificacao.get_impacto_display|default:classificacao.impacto }}</span>
+                                            <span class="badge text-bg-light border">Urgência {{ classificacao.get_urgencia_display|default:classificacao.urgencia }}</span>
+                                            <span class="badge text-bg-light border">{{ classificacao.setor|default:"Sem categoria" }}</span>
+                                        </div>
+                                        {% if classificacao.tickers_relacionados %}
+                                            <div class="small text-app-muted mb-2">
+                                                📌 Tickers: {{ classificacao.tickers_relacionados|join:", " }}
+                                            </div>
+                                        {% endif %}
+                                    {% endif %}
+                                {% endwith %}
+                                {% if noticia.resumo %}
+                                    <div class="text-app-muted small">{{ noticia.resumo|truncatechars:180 }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="text-end">
+                                {% if noticia.score_heuristico %}
+                                    <span class="badge text-bg-light border">Score H: {{ noticia.score_heuristico }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <!-- Paginação -->
+            {% if page_obj.has_other_pages %}
+            <nav class="mt-4">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page=1">Primeira</a></li>
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a></li>
+                    {% endif %}
+                    <li class="page-item disabled"><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
+                    {% if page_obj.has_next %}
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.next_page_number }}">Próxima</a></li>
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.paginator.num_pages }}">Última</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        {% else %}
+            <div class="text-center py-5">
+                <h3 class="h5">Nenhuma notícia encontrada</h3>
+                <p class="text-app-muted">Tente ajustar os filtros ou aguarde novas coletas.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

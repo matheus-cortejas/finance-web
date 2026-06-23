@@ -38,6 +38,7 @@ class Noticia(models.Model):
 	feed_url = models.URLField(blank=True, default="")
 	impacto = models.CharField(max_length=32, blank=True, default="pendente")
 	raw_data = models.JSONField(blank=True, null=True)
+	relevancia_binaria = models.BooleanField(default=False)	
 
 	class Meta:
 		ordering = ["-publicado_em", "-id"]
@@ -80,6 +81,9 @@ class PerfilInvestidor(models.Model):
 	sensibilidade_negativo = models.FloatField(default=0.5)
 	frequencia_alertas = models.CharField(max_length=32, choices=FREQUENCIA_ALERTAS_CHOICES, default="imediato")
 	alerta_min_prioridade = models.CharField(max_length=16, choices=ALERTA_PRIORIDADE_CHOICES, default="media")
+	notificacao_email = models.BooleanField(default=True)
+	notificacao_push = models.BooleanField(default=True)
+	notificacao_dashboard = models.BooleanField(default=True)
 
 	class Meta:
 		ordering = ["usuario_id"]
@@ -122,6 +126,10 @@ class NoticiaClassificacao(models.Model):
 	relevancia_llm = models.FloatField(default=0.0)
 	provider = models.CharField(max_length=32, blank=True, default="")
 	status = models.CharField(max_length=16, choices=STATUS_CHOICES, default="ok")
+	tickers_encontrados = models.JSONField(blank=True, default=list)
+	explicacao = models.TextField(blank=True, default="")
+	confianca_fase4 = models.FloatField(default=0.0)
+	provider_fase4 = models.CharField(max_length=32, blank=True, default="")
 
 	class Meta:
 		ordering = ["-id"]

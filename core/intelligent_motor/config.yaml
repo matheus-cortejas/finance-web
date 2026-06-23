@@ -1,0 +1,431 @@
+fase1:
+  modelo: "./models/paraphrase-multilingual-MiniLM-L12-v2"
+
+  centroides_referencia:
+    - "mercado financeiro, bolsa de valores, ações, investimentos, trading"
+    - "economia, inflação, juros, taxa Selic, política monetária, câmbio"
+    - "empresas, resultados corporativos, balanços, fusões e aquisições"
+    - "criptomoedas, bitcoin, blockchain, ativos digitais, stablecoins"
+    - "commodities, petróleo, minério de ferro, energia, agricultura"
+
+  threshold_relevancia: 0.20
+
+  cache:
+    backend: sqlite
+    ttl_segundos: 86400
+
+fase2:
+  threshold_similaridade: 0.35
+
+  cache:
+    backend: sqlite
+
+  mapeamento_ativos: ativos_mapeamento.json
+
+fase3:
+  # Configuração de pesos (podem ser usados para calcular um score final)
+  pesos:
+    ticker_explicito: 5
+    setor_relacionado: 3
+    macro: 3
+    negativo: 2
+    urgencia: 1
+    fonte_confiavel: 1
+    impacto: 3
+    tendencia_positiva: 1
+    tendencia_negativa: 2
+    tendencia_mista: 0
+    ambiguidade: -3
+
+  # Listas de palavras-chave (expansão)
+  palavras_macro:
+    - selic
+    - inflação
+    - juros
+    - copom
+    - ipca
+    - pib
+    - desemprego
+    - produção industrial
+    - dólar
+    - câmbio
+    - exportação
+    - tarifa
+    - guerra comercial
+    - acordos comerciais
+    - petróleo
+    - minério
+    - commodities
+    - safra
+    - algodão
+
+  palavras_negativas:
+    - prejuízo 
+    - fraude
+    - crise 
+    - multa 
+    - recuperação judicial 
+    - queda
+    - despenca
+    - inadimplência 
+    - calote 
+    - downgrade 
+    - processo 
+    - investigação 
+    - greve 
+    - recall
+    - escândalo 
+    - denúncia 
+    - polêmica 
+    - baixa 
+    - correção 
+    - crash 
+    - desvalorização
+
+  palavras_urgencia:
+    - urgente 
+    - alerta 
+    - emergencial 
+    - imediato
+    - agora
+    - urgência
+    - prazo
+    - deadline
+    - colapso
+    - risco iminente
+    - rompimento
+    - crítico
+
+  palavras_impacto:
+    - recorde
+    - inesperado
+    - surpresa
+    - forte
+    - massivo
+    - bilhões
+    - relevante
+    - significativo
+    - impacto
+    - abalo
+    - explosão
+    - disparada
+    - tombo
+    - reviravolta
+
+  palavras_tendencia_positiva:
+    - alta
+    - avanço
+    - recuperação
+    - sobe
+    - cresce
+    - otimismo
+    - positivo
+    - melhora
+    - ganho
+    - valorização
+    - lucro
+    - recorde
+
+  palavras_tendencia_negativa:
+    - baixa
+    - despenca
+    - piora
+    - recua
+    - pessimismo
+    - deteriora
+    - negativo
+    - perda
+    - queda
+    - desaceleração
+    - contração
+    - enfraquecimento
+
+  palavras_ambiguidade:
+    - pode
+    - talvez
+    - especula
+    - rumores
+    - analistas
+    - incerteza
+    - projeção
+    - possibilidade
+    - expectativa
+    - tendência
+    - cenário
+    - estimativa
+    - previsão
+
+  fontes_confiaveis: []
+
+fase4:
+  score_aprovacao_direta: 7
+  score_rejeicao_direta: 2
+  faixa_llm:
+    minimo: 3
+    maximo: 6
+  llm:
+    provider: openai
+    api_key: ${OPENAI_API_KEY}
+    model: gpt-4.1-mini
+  fallback_resultado: 1
+  cache:
+    enabled: true
+
+fase5:
+
+  llm:
+    provider: openai 
+    api_key: ${OPENAI_API_KEY}
+    model: gpt-4o-mini                  # corrigido: modelo existente
+    temperature: 1
+    max_tokens: 300  
+    timeout_seconds: 15
+    max_retries: 1
+
+  prompt:
+
+    max_content_chars: 1000
+
+    allowed_sentimentos:
+      - positivo
+      - neutro
+      - negativo
+
+    allowed_impactos:
+      - baixo
+      - medio
+      - alto
+
+    allowed_categorias:
+      - resultados
+      - regulacao
+      - commodities
+      - macroeconomia
+      - empresa
+      - tecnologia
+      - outros
+
+  cache:
+    enabled: true
+    ttl_seconds: 86400
+    key_prefix: fase5:result
+
+  fallback:
+
+    enabled: true
+
+    impacto_thresholds:
+      alto: 8
+      medio: 5
+
+    urgencia:
+      default: 5
+      max: 10
+
+    sentimento:
+
+      positivo_keywords:
+        - lucro
+        - crescimento
+        - recorde
+        - expansao
+        - valorizacao
+        - aprovacao
+        - dividendos
+
+      negativo_keywords:
+        - prejuizo
+        - fraude
+        - crise
+        - queda
+        - multa
+        - investigacao
+        - recuperacao judicial
+
+    urgencia_keywords:
+
+      imediata:
+        palavras:
+          - urgente
+          - imediatamente
+          - emergencial
+        valor: 10
+
+      alta:
+        palavras:
+          - alerta
+          - atencao
+          - risco
+        valor: 8
+
+      media:
+        palavras:
+          - monitoramento
+          - acompanhamento
+        valor: 5
+
+    categorias:
+
+      macroeconomia:
+        - selic
+        - juros
+        - copom
+        - inflacao
+        - ipca
+        - pib
+        - cambio
+        - dolar
+
+      commodities:
+        - petroleo
+        - minerio
+        - soja
+        - milho
+        - ouro
+        - commodity
+
+      regulacao:
+        - cvm
+        - bacen
+        - regulacao
+        - regulamentacao
+        - lei
+        - congresso
+
+      resultados:
+        - resultado
+        - balanco
+        - lucro
+        - ebitda
+        - receita
+        - guidance
+
+      tecnologia:
+        - ia
+        - inteligencia artificial
+        - software
+        - startup
+        - tecnologia
+        - cloud
+
+      empresa:
+        - aquisicao
+        - fusao
+        - incorporacao
+        - joint venture
+
+    defaults:
+
+      sentimento: neutro
+      impacto: medio
+      urgencia: 5
+      categoria: outros
+      explicacao: "Classificação produzida por fallback heurístico."
+
+  validation:
+
+    urgencia:
+      min: 0
+      max: 10
+
+    required_fields:
+      - sentimento
+      - impacto
+      - urgencia
+      - categoria
+      - explicacao
+
+  logging:
+
+    enabled: true
+
+    events:
+      - CACHE_HIT
+      - CACHE_MISS
+      - LLM_CLASSIFICATION
+      - LLM_FALLBACK
+      - VALIDATION_ERROR
+
+  metrics:
+
+    enabled: true
+
+    collect:
+      - fase5_total_chamadas
+      - fase5_taxa_fallback
+      - fase5_tempo_medio_llm_ms
+      - fase5_distribuicao_sentimento
+      - fase5_distribuicao_impacto
+      - fase5_distribuicao_categoria
+
+fase6:
+  regras:
+    - nome: impacto_negativo_alto
+      condicoes:
+        e:
+          - impacto: alto
+          - sentimento: negativo
+      prioridade: critica
+      acoes:
+        - email
+        - push
+        - dashboard_destacado
+      explicacao: >
+        Impacto alto com sentimento negativo:
+        requer atenção imediata.
+
+    - nome: impacto_alto_ou_urgencia
+      condicoes:
+        ou:
+          - impacto: alto
+          - urgencia:
+              min: 8
+      prioridade: alta
+      acoes:
+        - push
+        - dashboard
+      explicacao: >
+        Alto impacto ou urgência elevada.
+
+    - nome: score_heuristico_ou_relevancia
+      condicoes:
+        ou:
+          - score_heuristico:
+              min: 10
+          - relevancia_global:
+              min: 0.85
+      prioridade: media
+      acoes:
+        - dashboard
+      explicacao: >
+        Relevância significativa detectada.
+
+    - nome: default
+      condicoes: {}
+      prioridade: baixa
+      acoes:
+        - historico
+      explicacao: >
+        Notícia registrada apenas para histórico.
+
+  score_final:
+    pesos:
+      relevancia_global: 0.4
+      score_heuristico: 0.4
+      urgencia: 0.2
+    max_score_heuristico: 20
+    max_urgencia: 10
+
+  perfil_padrao:
+    canais_habilitados:
+      - email
+      - push
+      - dashboard
+    notificar_apenas_categorias: []
+
+  acoes_canais:
+    email: email
+    push: push
+    dashboard: dashboard
+    dashboard_destacado: dashboard
+    historico: historico

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Q
 from django.http import JsonResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import redirect, render, get_object_or_404
+from django.core.paginator import Paginator
+from django.db.models import OuterRef, Subquery
 
 from core.forms import PerfilInvestidorForm
 from core.models import (
@@ -109,11 +112,60 @@ def asset_suggestions(request):
 
 @login_required
 def dashboard(request):
+    from django.utils import timezone
+    from datetime import timedelta
+    from django.db.models import Count, Avg, Q
+
     carteira = _get_or_create_carteira(request.user)
     perfil = _get_or_create_perfil(request.user)
     perfil_form = PerfilInvestidorForm(instance=perfil)
     asset_matches = []
 
+    # ========== MÉTRICAS E GRÁFICOS ==========
+    hoje = timezone.now().date()
+    inicio_hoje = timezone.make_aware(datetime.combine(hoje, datetime.min.time()))
+    noticias_hoje = Noticia.objects.filter(publicado_em__gte=inicio_hoje).count()
+    alertas_24h = Alerta.objects.filter(usuario=request.user, created_at__gte=timezone.now() - timedelta(hours=24)).count()
+    avg_score = NoticiaScore.objects.filter(usuario=request.user).aggregate(media=Avg('score_final'))['media'] or 0
+
+    # Gráficos (últimos 30 dias)
+    trinta_dias_atras = timezone.now() - timedelta(days=30)
+    sentimentos = NoticiaClassificacao.objects.filter(
+        noticia__scores__usuario=request.user,
+        noticia__publicado_em__gte=trinta_dias_atras
+    ).values('sentimento').annotate(total=Count('id'))
+
+    sentimento_labels = [s['sentimento'] for s in sentimentos]
+    sentimento_data = [s['total'] for s in sentimentos]
+
+    urgencias = NoticiaClassificacao.objects.filter(
+        noticia__scores__usuario=request.user,
+        noticia__publicado_em__gte=trinta_dias_atras
+    ).values('urgencia').annotate(total=Count('id'))
+
+    urgencia_labels = [u['urgencia'] for u in urgencias]
+    urgencia_data = [u['total'] for u in urgencias]
+
+    categorias = NoticiaClassificacao.objects.filter(
+        noticia__scores__usuario=request.user,
+        noticia__publicado_em__gte=trinta_dias_atras,
+        setor__isnull=False
+    ).exclude(setor='').values('setor').annotate(total=Count('id')).order_by('-total')[:5]
+
+    categoria_labels = [c['setor'] for c in categorias]
+    categoria_data = [c['total'] for c in categorias]
+
+    # Tendências (tickers mais mencionados nos alertas dos últimos 7 dias)
+    semana_atras = timezone.now() - timedelta(days=7)
+    tickers_tendencia = (
+        Alerta.objects.filter(usuario=request.user, created_at__gte=semana_atras)
+        .values('ativo__ticker')
+        .annotate(total=Count('id'))
+        .order_by('-total')[:5]
+    )
+    tendencia_tickers = [t['ativo__ticker'] for t in tickers_tendencia]
+
+    # ========== PROCESSAMENTO POST ==========
     if request.method == "POST":
         if request.POST.get("update_profile"):
             perfil_form = PerfilInvestidorForm(request.POST, instance=perfil)
@@ -188,8 +240,11 @@ def dashboard(request):
     for alert in recent_alerts:
         alert.score_for_user = alert_scores.get(alert.noticia_id)
 
+    # ========== RANKING ==========
     priority_filter = (request.GET.get("priority") or "").strip().lower()
     sector_filter = (request.GET.get("sector") or "").strip()
+    sentiment_filter = (request.GET.get("sentiment") or "").strip().lower()
+
     score_queryset = (
         NoticiaScore.objects.filter(usuario=request.user)
         .select_related("noticia", "noticia__classificacao")
@@ -199,6 +254,8 @@ def dashboard(request):
         score_queryset = score_queryset.filter(prioridade=priority_filter)
     if sector_filter:
         score_queryset = score_queryset.filter(noticia__classificacao__setor__iexact=sector_filter)
+    if sentiment_filter:
+        score_queryset = score_queryset.filter(noticia__classificacao__sentimento=sentiment_filter)
 
     ranked_news = []
     for score in score_queryset[:12]:
@@ -224,6 +281,7 @@ def dashboard(request):
                 "urgencia": urgencia,
                 "setor": setor,
                 "motivos_text": _format_motivos(score.motivos),
+                "tickers_relacionados": getattr(classificacao, "tickers_relacionados", []),
             }
         )
 
@@ -256,9 +314,20 @@ def dashboard(request):
             "sector_filter": sector_filter,
             "priority_options": [key for key in _PRIORITY_BADGES.keys()],
             "sector_options": sector_options,
+            # Métricas
+            "alertas_24h": alertas_24h,
+            "avg_score": round(avg_score, 2),
+            "noticias_hoje": noticias_hoje,
+            # Gráficos
+            "sentimento_labels": sentimento_labels,
+            "sentimento_data": sentimento_data,
+            "urgencia_labels": urgencia_labels,
+            "urgencia_data": urgencia_data,
+            "categoria_labels": categoria_labels,
+            "categoria_data": categoria_data,
+            "tendencia_tickers": tendencia_tickers,
         },
     )
-
 
 def home(request):
     if request.user.is_authenticated:
@@ -310,3 +379,95 @@ def record_interaction(request):
     update_profile_from_interactions(request.user)
 
     return JsonResponse({"ok": True, "created": created})
+
+@login_required  # opcional: pode ser pública
+def lista_noticias(request):
+    # Base queryset: notícias com relevância binária = 1 (relevantes)
+    noticias = Noticia.objects.filter(relevancia_binaria=True).select_related('classificacao').order_by('-publicado_em')
+
+    # Filtros
+    categoria = request.GET.get('categoria', '').strip()
+    sentimento = request.GET.get('sentimento', '').strip()
+    ticker = request.GET.get('ticker', '').strip().upper()
+    ordem = request.GET.get('ordem', '-publicado_em')
+
+    if categoria:
+        noticias = noticias.filter(classificacao__setor__iexact=categoria)
+    if sentimento:
+        noticias = noticias.filter(classificacao__sentimento=sentimento)
+    if ticker:
+        noticias = noticias.filter(
+            Q(titulo__icontains=ticker) |
+            Q(descricao__icontains=ticker) |
+            Q(conteudo__icontains=ticker)
+        )
+    if ordem:
+        # Se ordenar por score final, é necessário usar anotação ou subconsulta
+        if ordem == '-score_final':
+            if request.user.is_authenticated:
+                from django.db.models import OuterRef, Subquery
+                scores = NoticiaScore.objects.filter(noticia=OuterRef('pk'), usuario=request.user).order_by('-score_final')
+                noticias = noticias.annotate(score_final=Subquery(scores.values('score_final')[:1]))
+                noticias = noticias.order_by('-score_final')
+            else:
+                ordem = '-publicado_em'  # fallback seguro
+                noticias = noticias.order_by(ordem)
+        else:
+            noticias = noticias.order_by(ordem)
+
+    # Categorias disponíveis (para o select)
+    categorias_disponiveis = NoticiaClassificacao.objects.filter(
+        noticia__relevancia_binaria=True
+    ).exclude(setor='').values_list('setor', flat=True).distinct().order_by('setor')
+
+    paginator = Paginator(noticias, 20)  # 20 por página
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        'page_obj': page_obj,
+        'categorias_disponiveis': categorias_disponiveis,
+        'filtros': {
+            'categoria': categoria,
+            'sentimento': sentimento,
+            'ticker': ticker,
+            'ordem': ordem,
+        },
+    }
+    return render(request, 'core/lista_noticias.html', context)
+
+@login_required  # opcional: pode ser pública
+def detalhe_noticia(request, noticia_id):
+    noticia = get_object_or_404(Noticia, pk=noticia_id)
+    score = None
+    if request.user.is_authenticated:
+        score = NoticiaScore.objects.filter(noticia=noticia, usuario=request.user).first()
+    return render(request, 'core/detalhe_noticia.html', {'noticia': noticia, 'score': score})
+
+# meus_alertas (autenticada)
+@login_required
+def meus_alertas(request):
+    alertas = Alerta.objects.filter(usuario=request.user).select_related('noticia', 'ativo', 'noticia__classificacao').order_by('-created_at')
+
+    # Filtros
+    prioridade = request.GET.get('prioridade', '').strip()
+    ticker = request.GET.get('ticker', '').strip().upper()
+
+    if prioridade:
+        alertas = alertas.filter(noticia__scores__prioridade=prioridade, noticia__scores__usuario=request.user)
+    if ticker:
+        alertas = alertas.filter(ativo__ticker__icontains=ticker)
+
+    # Paginação
+    paginator = Paginator(alertas, 15)
+    page_number = request.GET.get('page')
+    page_obj = paginator.get_page(page_number)
+
+    context = {
+        'page_obj': page_obj,
+        'filtros': {
+            'prioridade': prioridade,
+            'ticker': ticker,
+        },
+    }
+    return render(request, 'core/meus_alertas.html', context)

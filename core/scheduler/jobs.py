@@ -15,14 +15,6 @@ def get_watchlist_assets():
     return list_watchlist_assets()
 
 
-def purge_articles_older_than_days(days: int) -> int:
-    from core.models import Noticia
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    deleted_count, _ = Noticia.objects.filter(publicado_em__isnull=False, publicado_em__lt=cutoff).delete()
-    return deleted_count
-
-
 def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
     from core.services.noticia_service import check_feeds_and_report as core_check_feeds_and_report
 
@@ -44,8 +36,3 @@ def collect_initial_news(feed_urls):
     logger.info("Coleta inicial concluída com %d alerta(s)", len(reports))
     return reports
 
-
-def cleanup_old_articles() -> int:
-    deleted = purge_articles_older_than_days(ARTICLE_RETENTION_DAYS)
-    logger.info("Limpeza de artigos antigos removeu %d registro(s)", deleted)
-    return deleted

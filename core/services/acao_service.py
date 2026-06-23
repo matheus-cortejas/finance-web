@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import os
-
+import json
+import logging
+from pathlib import Path
 from core.models import Ativo
 from setup.settings import DEFAULT_B3_CSV
 
-
+logger = logging.getLogger("acao_service")
 WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies#S&P_500_component_stocks"
 
 
@@ -24,6 +26,42 @@ def _insert_asset(source: str, code: str, name: str) -> None:
         defaults={"nome": name, "source": source},
     )
 
+def load_assets_from_json(json_path: str) -> int:
+    """Carrega ativos a partir de um arquivo JSON (formato: lista de dicts com 'ticker', 'nome', 'source').
+    Retorna o número de registros inseridos/atualizados.
+    """
+    from core.models import Ativo
+
+    json_path = Path(json_path).expanduser()
+    if not json_path.exists():
+        logger.warning("Arquivo JSON não encontrado: %s", json_path)
+        return 0
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, list):
+        logger.error("Formato inválido: esperava uma lista de ativos.")
+        return 0
+
+    count = 0
+    for item in data:
+        ticker = item.get("ticker")
+        nome = item.get("nome")
+        source = item.get("source", "sp500")  # default
+        if not ticker or not nome:
+            continue
+        obj, created = Ativo.objects.update_or_create(
+            ticker=ticker,
+            defaults={"nome": nome, "source": source}
+        )
+        count += 1
+        if created:
+            logger.debug("Inserido novo ativo: %s (%s)", ticker, nome)
+        else:
+            logger.debug("Ativo já existente: %s", ticker)
+    logger.info("Carregados/atualizados %d ativos a partir do JSON", count)
+    return count
 
 def fetch_sp500_and_store() -> int:
     if _count_assets_by_source("sp500") > 0:

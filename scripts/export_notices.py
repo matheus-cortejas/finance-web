@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+#python export_notices.py caminho\absoluto\db.sqlite3 --incluir-conteudo -o noticias.json
 # -*- coding: utf-8 -*-
 """
 Script para extrair dados da tabela core_noticia de um banco SQLite3

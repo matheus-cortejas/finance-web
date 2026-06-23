@@ -9,7 +9,7 @@ class PerfilInvestidorForm(forms.ModelForm):
     setores_preferidos_text = forms.CharField(
         required=False,
         label="Setores preferidos",
-        help_text="Separe os setores por virgula.",
+        help_text="Separe os setores por vírgula.",
     )
 
     class Meta:
@@ -20,6 +20,9 @@ class PerfilInvestidorForm(forms.ModelForm):
             "frequencia_alertas",
             "alerta_min_prioridade",
             "sensibilidade_negativo",
+            "notificacao_email",      # NOVO
+            "notificacao_push",       # NOVO
+            "notificacao_dashboard",  # NOVO
         ]
         widgets = {
             "perfil_risco": forms.Select(attrs={"class": "form-select"}),
@@ -27,15 +30,13 @@ class PerfilInvestidorForm(forms.ModelForm):
             "frequencia_alertas": forms.Select(attrs={"class": "form-select"}),
             "alerta_min_prioridade": forms.Select(attrs={"class": "form-select"}),
             "sensibilidade_negativo": forms.NumberInput(
-                attrs={
-                    "class": "form-control",
-                    "min": "0",
-                    "max": "1",
-                    "step": "0.05",
-                }
+                attrs={"class": "form-control", "min": "0", "max": "1", "step": "0.05"}
             ),
+            "notificacao_email": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "notificacao_push": forms.CheckboxInput(attrs={"class": "form-check-input"}),
+            "notificacao_dashboard": forms.CheckboxInput(attrs={"class": "form-check-input"}),
         }
-
+        
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         setores = []

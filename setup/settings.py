@@ -85,6 +85,7 @@ ASGI_APPLICATION = "setup.asgi.application"
 DB_PATH = Path(os.getenv("DB_PATH", PROJECT_ROOT / "db.sqlite3"))
 DEFAULT_B3_CSV = Path(os.getenv("B3_CSV_PATH", PROJECT_ROOT / "IBOVDia_24-03-26.csv"))
 DEFAULT_RSS_PATH = Path(os.getenv("RSS_PATH", PROJECT_ROOT / "rss.txt"))
+DEFAULT_ASSETS_JSON_PATH = Path(os.getenv("ASSETS_JSON_PATH", PROJECT_ROOT / "core_ativos.json"))
 LOG_FILE_PATH = Path(os.getenv("LOG_FILE_PATH", PROJECT_ROOT / "logs" / "monitor.log"))
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")

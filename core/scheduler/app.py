@@ -3,22 +3,21 @@ from __future__ import annotations
 import logging
 
 try:
-    from apscheduler.schedulers.blocking import BlockingScheduler
-except Exception:  # pragma: no cover - optional dependency
-    BlockingScheduler = None
+    from apscheduler.schedulers.background import BackgroundScheduler
+except ImportError:
+    BackgroundScheduler = None
 
 from setup.settings import MONITOR_INTERVAL_SECONDS
-from core.scheduler.jobs import cleanup_old_articles, collect_news
-
+from core.scheduler.jobs import collect_news   # remova cleanup_old_articles se não usar
 
 logger = logging.getLogger("scheduler.app")
 
+def build_scheduler(feed_urls):
+    if BackgroundScheduler is None:
+        logger.error("APScheduler não instalado. Instale com: pip install apscheduler")
+        return None
 
-def build_scheduler(feed_urls) -> BlockingScheduler:
-    if BlockingScheduler is None:
-        raise RuntimeError("APScheduler is required to run the monitor scheduler")
-
-    scheduler = BlockingScheduler()
+    scheduler = BackgroundScheduler()
     scheduler.add_job(
         collect_news,
         "interval",
@@ -30,20 +29,12 @@ def build_scheduler(feed_urls) -> BlockingScheduler:
         replace_existing=True,
     )
     logger.info("Job agendado: collect_news a cada %d segundos", MONITOR_INTERVAL_SECONDS)
-    scheduler.add_job(
-        cleanup_old_articles,
-        "interval",
-        hours=24,
-        id="cleanup_old_articles",
-        coalesce=True,
-        max_instances=1,
-        replace_existing=True,
-    )
-    logger.info("Job agendado: cleanup_old_articles a cada 24 horas")
     return scheduler
-
 
 def run_scheduler(feed_urls) -> None:
     scheduler = build_scheduler(feed_urls)
-    logger.info("Iniciando scheduler com %d feed(s)", len(feed_urls))
+    if scheduler is None:
+        logger.error("Não foi possível criar o scheduler. Verifique a instalação do APScheduler.")
+        return
+    logger.info("Iniciando scheduler em background com %d feed(s)", len(feed_urls))
     scheduler.start()

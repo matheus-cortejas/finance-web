@@ -7,11 +7,14 @@ from setup.logger import configure_logging
 from setup.settings import (
     DEFAULT_B3_CSV,
     DEFAULT_RSS_PATH,
+    DEFAULT_ASSETS_JSON_PATH,
     OPENAI_API_KEY,
     OPENAI_MAX_TOKENS,
     OPENAI_MODEL,
     OPENAI_USE_CONTENT,
 )
+from core.services.acao_service import fetch_sp500_and_store, parse_b3_csv
+from core.services.acao_service import load_assets_from_json
 
 
 logger = logging.getLogger("cli.main")
@@ -43,33 +46,35 @@ def _find_assets_by_term(term: str) -> list[dict]:
 
 def run_monitor_workflow(b3_csv: str | os.PathLike[str] | None = None, rss_path: str | os.PathLike[str] | None = None, interactive: bool = True) -> None:
     from core.models import Ativo
-    from core.services.acao_service import fetch_sp500_and_store, parse_b3_csv
     from core.scheduler.jobs import collect_initial_news
 
     configure_logging()
     logger.info("Inicializando monitor de notícias")
-    logger.info(
-        "Configuração OpenAI: model=%s key=%s content=%s max_tokens=%d",
-        OPENAI_MODEL,
-        "presente" if OPENAI_API_KEY else "ausente",
-        OPENAI_USE_CONTENT,
-        OPENAI_MAX_TOKENS,
-    )
 
-    logger.info("Populando base S&P500")
-    try:
-        inserted = fetch_sp500_and_store()
-        logger.info("S&P500 inseridos: %d", inserted)
-    except Exception:
-        logger.exception("Falha ao buscar S&P500")
+    # Tenta carregar a partir do JSON primeiro
+    json_path = os.path.join(DEFAULT_ASSETS_JSON_PATH.parent, "core_ativos.json")  # ajuste o caminho
+    if os.path.exists(json_path):
+        logger.info("Carregando ativos do arquivo JSON: %s", json_path)
+        load_assets_from_json(json_path)
+    else:
+        logger.warning("Arquivo JSON não encontrado; recorrendo a fontes externas.")
+        # Populando S&P500 (web scraping)
+        logger.info("Populando base S&P500")
+        try:
+            inserted = fetch_sp500_and_store()
+            logger.info("S&P500 inseridos: %d", inserted)
+        except Exception:
+            logger.exception("Falha ao buscar S&P500")
 
-    logger.info("Carregando CSV B3")
-    try:
-        inserted = parse_b3_csv(os.fspath(b3_csv or DEFAULT_B3_CSV))
-        logger.info("B3 inseridos: %d", inserted)
-    except Exception:
-        logger.exception("Falha ao parsear CSV B3")
+        # Carregando CSV B3
+        logger.info("Carregando CSV B3")
+        try:
+            inserted = parse_b3_csv(os.fspath(b3_csv or DEFAULT_B3_CSV))
+            logger.info("B3 inseridos: %d", inserted)
+        except Exception:
+            logger.exception("Falha ao parsear CSV B3")
 
+    # Resto do workflow (contagem de ativos, feeds, etc.)
     logger.info("Base total de ativos: %d", Ativo.objects.count())
     if interactive:
         logger.info("Modo interativo desativado na refatoração; use a interface Django para registrar ativos")
@@ -82,14 +87,6 @@ def run_monitor_workflow(b3_csv: str | os.PathLike[str] | None = None, rss_path:
     logger.info("Fazendo verificação inicial (último 1 dia) em %d feed(s)", len(feeds))
     reports = collect_initial_news(feeds)
     logger.info("Verificação inicial concluída com %d alerta(s)", len(reports))
-    for report in reports:
-        logger.info(
-            "[ALERTA INICIAL] %s - %s -> %s | %s",
-            report["published"],
-            report["title"],
-            report["matches"],
-            report["link"],
-        )
 
 
 def run_scheduler_workflow(rss_path: str | os.PathLike[str] | None = None) -> None:

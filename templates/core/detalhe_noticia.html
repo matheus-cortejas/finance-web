@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{{ noticia.titulo|default:"Detalhe da Notícia" }} | Monitor Financeiro{% endblock %}
+
+{% block body %}
+<div class="mb-4 fade-in">
+    <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary btn-sm mb-3">← Voltar para o Dashboard</a>
+    <div class="glass surface p-4 p-lg-5">
+        <span class="soft-badge">Notícia</span>
+        <h1 class="display-6 fw-bold hero-title mt-2">{{ noticia.titulo|default:"Sem título" }}</h1>
+        <div class="text-app-muted small mb-3">
+            {{ noticia.publicado_em|date:"d/m/Y H:i" }} · 
+            <a href="{{ noticia.link }}" target="_blank" rel="noopener noreferrer">Fonte original ↗</a>
+        </div>
+
+        <!-- Resumo / Conteúdo -->
+        {% if noticia.resumo %}
+            <div class="alert alert-light border rounded-4 p-3 mb-4">
+                <strong>📄 Resumo:</strong> {{ noticia.resumo }}
+            </div>
+        {% elif noticia.descricao %}
+            <div class="alert alert-light border rounded-4 p-3 mb-4">
+                <strong>📝 Descrição:</strong> {{ noticia.descricao }}
+            </div>
+        {% endif %}
+        {% if noticia.conteudo %}
+            <div class="mb-4">
+                <h5>📰 Conteúdo completo</h5>
+                <div class="text-pre-line">{{ noticia.conteudo|linebreaks }}</div>
+            </div>
+        {% endif %}
+
+        <!-- Classificação (NoticiaClassificacao) -->
+        {% with classificacao=noticia.classificacao %}
+            {% if classificacao %}
+                <hr class="my-4">
+                <h3 class="h5 fw-bold">🧠 Classificação Inteligente</h3>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <div class="p-2 bg-light rounded-3 text-center">
+                            <div class="small text-muted">Sentimento</div>
+                            <div class="fw-bold {% if classificacao.sentimento == 'positivo' %}text-success{% elif classificacao.sentimento == 'negativo' %}text-danger{% else %}text-secondary{% endif %}">
+                                {{ classificacao.get_sentimento_display|default:classificacao.sentimento|capfirst }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-2 bg-light rounded-3 text-center">
+                            <div class="small text-muted">Impacto</div>
+                            <div class="fw-bold">{{ classificacao.get_impacto_display|default:classificacao.impacto|capfirst }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-2 bg-light rounded-3 text-center">
+                            <div class="small text-muted">Urgência</div>
+                            <div class="fw-bold">{{ classificacao.get_urgencia_display|default:classificacao.urgencia|capfirst }}</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="p-2 bg-light rounded-3 text-center">
+                            <div class="small text-muted">Setor / Categoria</div>
+                            <div class="fw-bold">{{ classificacao.setor|default:"Não definido" }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tickers relacionados e encontrados -->
+                <div class="mb-3">
+                    <strong>🎯 Tickers relacionados:</strong>
+                    {% if classificacao.tickers_relacionados %}
+                        {% for ticker in classificacao.tickers_relacionados %}
+                            <span class="badge bg-primary bg-opacity-10 text-primary me-1 p-2">{{ ticker }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">Nenhum</span>
+                    {% endif %}
+                </div>
+                <div class="mb-3">
+                    <strong>🔍 Tickers encontrados (regex):</strong>
+                    {% if classificacao.tickers_encontrados %}
+                        {% for ticker in classificacao.tickers_encontrados %}
+                            <span class="badge bg-secondary bg-opacity-10 text-secondary me-1 p-2">{{ ticker }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">Nenhum</span>
+                    {% endif %}
+                </div>
+
+                <!-- Explicação da LLM -->
+                {% if classificacao.explicacao %}
+                    <div class="mb-3">
+                        <strong>💬 Explicação:</strong>
+                        <div class="p-2 bg-light rounded-3">{{ classificacao.explicacao }}</div>
+                    </div>
+                {% endif %}
+
+                <!-- Metadados de provedor e confiança -->
+                <div class="small text-muted">
+                    <span>Provedor F4: {{ classificacao.provider_fase4|default:"—" }}</span> |
+                    <span>Confiança F4: {{ classificacao.confianca_fase4|default:"—" }}</span> |
+                    <span>Provedor Classif.: {{ classificacao.provider|default:"—" }}</span> |
+                    <span>Status: {{ classificacao.status }}</span>
+                </div>
+            {% endif %}
+        {% endwith %}
+
+        <!-- Score do usuário (se logado) -->
+        {% if score %}
+            <hr>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <div class="p-3 rounded-4 bg-white border text-center">
+                        <div class="text-muted small">Score personalizado</div>
+                        <div class="display-6 fw-bold">{{ score.score_final|floatformat:2 }}</div>
+                        <span class="badge {{ score.badge_class }}">{{ score.get_prioridade_display }}</span>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-3 rounded-4 bg-white border">
+                        <div class="text-muted small">Detalhes do cálculo</div>
+                        <div class="small">
+                            {% for key, value in score.motivos.items %}
+                                {% if value and key not in 'tickers_relacionados,carteira_tickers' %}
+                                    <strong>{{ key }}:</strong> {{ value }}<br>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Meus Alertas | Monitor Financeiro{% endblock %}
+
+{% block body %}
+<div class="fade-in">
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+        <div>
+            <span class="soft-badge">Alertas personalizados</span>
+            <h1 class="h2 fw-bold hero-title mb-0 mt-2">Meus Alertas</h1>
+            <p class="hero-subtitle mb-0">Notícias que impactam os ativos da sua carteira.</p>
+        </div>
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">← Dashboard</a>
+    </div>
+
+    <!-- Filtros simples -->
+    <div class="glass surface p-4 mb-4">
+        <form method="get" action="{% url 'meus_alertas' %}" class="row g-3">
+            <div class="col-md-4">
+                <label class="form-label small">Prioridade</label>
+                <select name="prioridade" class="form-select">
+                    <option value="">Todas</option>
+                    <option value="critica" {% if filtros.prioridade == 'critica' %}selected{% endif %}>Crítica</option>
+                    <option value="alta" {% if filtros.prioridade == 'alta' %}selected{% endif %}>Alta</option>
+                    <option value="media" {% if filtros.prioridade == 'media' %}selected{% endif %}>Média</option>
+                    <option value="baixa" {% if filtros.prioridade == 'baixa' %}selected{% endif %}>Baixa</option>
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Ativo (ticker)</label>
+                <input type="text" name="ticker" class="form-control" placeholder="Ex.: PETR4" value="{{ filtros.ticker }}">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button class="btn btn-primary w-100" type="submit">Filtrar</button>
+                <a href="{% url 'meus_alertas' %}" class="btn btn-outline-secondary w-100 ms-2">Limpar</a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Lista de alertas -->
+    <div class="glass surface p-4">
+        {% if page_obj %}
+            <div class="list-group list-group-flush">
+                {% for alerta in page_obj %}
+                    <div class="list-group-item px-0 bg-transparent">
+                        <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                            <div class="flex-grow-1">
+                                <div class="fw-bold">
+                                    <a href="{% url 'detalhe_noticia' alerta.noticia.id %}" class="text-decoration-none text-reset" data-interaction-open data-noticia-id="{{ alerta.noticia.id }}">
+                                        {{ alerta.ativo.ticker }} · {{ alerta.noticia.titulo|default:alerta.noticia.link }}
+                                    </a>
+                                </div>
+                                <div class="text-app-muted small mb-1">
+                                    {{ alerta.created_at|date:"d/m/Y H:i" }}
+                                </div>
+                                {% with score=alerta.noticia.scores.first %}
+                                    {% if score %}
+                                        <div class="d-flex flex-wrap gap-2 mb-2">
+                                            <span class="badge {{ score.badge_class }}">{{ score.get_prioridade_display }}</span>
+                                            <span class="badge text-bg-light border">Score {{ score.score_final }}</span>
+                                        </div>
+                                    {% endif %}
+                                {% endwith %}
+                                {% with classificacao=alerta.noticia.classificacao %}
+                                    {% if classificacao %}
+                                        <div class="d-flex flex-wrap gap-2 mb-2">
+                                            <span class="badge {% if classificacao.sentimento == 'positivo' %}text-bg-success{% elif classificacao.sentimento == 'negativo' %}text-bg-danger{% else %}text-bg-secondary{% endif %}">
+                                                {{ classificacao.get_sentimento_display|default:classificacao.sentimento }}
+                                            </span>
+                                            <span class="badge text-bg-light border">Impacto {{ classificacao.get_impacto_display|default:classificacao.impacto }}</span>
+                                            <span class="badge text-bg-light border">Urgência {{ classificacao.get_urgencia_display|default:classificacao.urgencia }}</span>
+                                        </div>
+                                    {% endif %}
+                                {% endwith %}
+                                {% if alerta.noticia.resumo %}
+                                    <div class="text-app-muted small mt-1">{{ alerta.noticia.resumo|truncatechars:180 }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+
+            <!-- Paginação -->
+            {% if page_obj.has_other_pages %}
+            <nav class="mt-4">
+                <ul class="pagination justify-content-center">
+                    {% if page_obj.has_previous %}
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page=1">Primeira</a></li>
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}">Anterior</a></li>
+                    {% endif %}
+                    <li class="page-item disabled"><span class="page-link">Página {{ page_obj.number }} de {{ page_obj.paginator.num_pages }}</span></li>
+                    {% if page_obj.has_next %}
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.next_page_number }}">Próxima</a></li>
+                        <li class="page-item"><a class="page-link" href="?{% if request.GET.urlencode %}{{ request.GET.urlencode }}&{% endif %}page={{ page_obj.paginator.num_pages }}">Última</a></li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        {% else %}
+            <div class="text-center py-5">
+                <h3 class="h5">Nenhum alerta encontrado</h3>
+                <p class="text-app-muted">Ainda não há alertas para os ativos da sua carteira.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

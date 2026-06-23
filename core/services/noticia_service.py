@@ -19,30 +19,30 @@ from core.models import (
     NoticiaScore,
     PerfilInvestidor,
 )
-from core.llm.relevance import is_relevant
-from core.llm.openai_client import classify_article, summarize_article
+from core.intelligent_motor.pipeline_orchestrator import processar_noticia_completa
+from core.intelligent_motor.fase6_decisor.pipeline import decidir_alerta
+from core.intelligent_motor.config_loader import load_global_config
 from core.parsers.factory import create_parser
-from core.services.scoring_service import calculate_relevance_score, is_priority_at_least
-
 
 logger = logging.getLogger("services.noticia_service")
 
+# ============================================================================
+# Funções auxiliares (mantidas do código original)
+# ============================================================================
+
+PRIORITY_ORDER = ["baixa", "media", "alta", "critica"]
+
+def is_priority_at_least(priority: str, minimum: str) -> bool:
+    try:
+        return PRIORITY_ORDER.index(priority) >= PRIORITY_ORDER.index(minimum)
+    except ValueError:
+        return False
 
 def _parse_date(entry) -> datetime:
     published = entry.get("published")
     if isinstance(published, datetime):
         return published
     return datetime.now(timezone.utc)
-
-
-# Expressões regulares e constantes
-_TAG_RE = re.compile(r"<[^>]+>")
-_CODE_LETTERS_RE = re.compile(r"\d+")
-_TRACKING_PARAMS = {
-    "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "mkt_tok",
-    "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",
-}
-
 
 def _normalize_link(link: str) -> str:
     """Remove parâmetros de tracking da URL."""
@@ -62,6 +62,10 @@ def _normalize_link(link: str) -> str:
     query = urlencode(query_items, doseq=True)
     return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, query, ""))
 
+_TRACKING_PARAMS = {
+    "fbclid", "gclid", "igshid", "mc_cid", "mc_eid", "mkt_tok",
+    "utm_campaign", "utm_content", "utm_medium", "utm_source", "utm_term",
+}
 
 def _safe_raw_data(raw_entry) -> dict | None:
     if raw_entry is None:
@@ -72,251 +76,52 @@ def _safe_raw_data(raw_entry) -> dict | None:
     except TypeError:
         return json.loads(json.dumps(raw_entry, default=str))
 
-
-def _code_aliases(code: str) -> list[str]:
-    """Retorna possíveis aliases para um ticker (ex: PETR4 -> PETR)."""
-    if not code:
-        return []
-    letters_only = _CODE_LETTERS_RE.sub("", code).strip()
-    if len(letters_only) >= 4 and letters_only.upper() != code.upper():
-        return [letters_only]
-    return []
-
-
-def _find_matches_in_text(text: str, watch_terms: dict) -> list[tuple[str, str]]:
-    """Busca tickers ou nomes de empresas no texto (match superficial)."""
-    text_lower = text.lower()
-    matches = []
-    for code, meta in watch_terms.items():
-        name = meta.get("name", "")
-        if re.search(r"\b" + re.escape(code.lower()) + r"\b", text_lower):
-            matches.append((code, name))
-            continue
-        if name and name.lower() in text_lower:
-            matches.append((code, name))
-            continue
-        for alias in _code_aliases(code):
-            if re.search(r"\b" + re.escape(alias.lower()) + r"\b", text_lower):
-                matches.append((code, name))
-                break
-    return matches
-
-
-def _unique_matches(*match_groups: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    """Junta matches de várias fontes removendo duplicatas."""
-    unique = []
-    seen_codes = set()
-    for group in match_groups:
-        for code, name in group:
-            if code in seen_codes:
-                continue
-            seen_codes.add(code)
-            unique.append((code, name))
-    return unique
-
-
 def seen_article(link: str) -> bool:
     return Noticia.objects.filter(link=link).exists()
 
+def _get_all_tickers() -> list[str]:
+    """Retorna todos os tickers cadastrados no sistema."""
+    return list(Ativo.objects.values_list('ticker', flat=True))
 
-def mark_article_seen(link: str, published_ts: int | None = None, raw_data: dict | None = None) -> None:
-    published_at = datetime.fromtimestamp(published_ts, tz=timezone.utc) if published_ts is not None else None
-    Noticia.objects.get_or_create(
-        link=link,
-        defaults={
-            "titulo": "",
-            "descricao": "",
-            "publicado_em": published_at,
-            "feed_url": "",
-            "impacto": "pendente",
-            "raw_data": raw_data,
-        },
-    )
-
-
-def save_article(
-    link: str,
-    title: str,
-    description: str,
-    published_ts: int | None = None,
-    feed_url: str | None = None,
-    raw_data: dict | None = None,
-    content: str | None = None,          # NOVO: parâmetro para conteúdo limpo
-) -> int | None:
-    published_at = datetime.fromtimestamp(published_ts, tz=timezone.utc) if published_ts is not None else None
-    defaults = {
-        "titulo": title,
-        "descricao": description,
-        "publicado_em": published_at,
-        "feed_url": feed_url or "",
-        "impacto": "pendente",
-        "raw_data": raw_data,
+def _convert_perfil(perfil: PerfilInvestidor) -> dict:
+    """Converte o modelo PerfilInvestidor para o formato esperado pela fase 6."""
+    canais_habilitados = []
+    if perfil.notificacao_email:
+        canais_habilitados.append("email")
+    if perfil.notificacao_push:
+        canais_habilitados.append("push")
+    if perfil.notificacao_dashboard:
+        canais_habilitados.append("dashboard")
+    if not canais_habilitados:
+        canais_habilitados = ["dashboard"]
+    categorias_permitidas = []
+    if hasattr(perfil, 'notificar_apenas_categorias') and perfil.notificar_apenas_categorias:
+        categorias_permitidas = perfil.notificar_apenas_categorias
+    return {
+        "canais_habilitados": canais_habilitados,
+        "categorias_permitidas": categorias_permitidas,
     }
-    # Se o model tiver o campo 'conteudo', inclui (caso contrário, será ignorado pelo update_or_create)
-    if content is not None and hasattr(Noticia, 'conteudo'):
-        defaults["conteudo"] = content
 
-    article, _ = Noticia.objects.update_or_create(link=link, defaults=defaults)
-    return article.id
+# ============================================================================
+# Função principal de processamento
+# ============================================================================
 
+def check_feeds_and_report(feed_urls, watch_assets=None, within_days=None):
+    """
+    Coleta feeds, processa usando o pipeline inteligente e gera alertas.
+    O parâmetro watch_assets é ignorado (mantido apenas para compatibilidade com chamadas antigas).
+    """
+    # Inicializa o pipeline (carrega modelo, cache, etc.)
+    # A primeira chamada ao processar_noticia_completa já fará a inicialização lazy,
+    # mas podemos forçar a inicialização dos singletons se desejar.
+    config = load_global_config()  # garante que a config seja carregada
 
-def link_article_match(article_id: int, asset_id: int) -> None:
-    article = Noticia.objects.filter(id=article_id).first()
-    asset = Ativo.objects.filter(id=asset_id).first()
-    if not article or not asset:
-        return
+    # Carrega todos os tickers para usar como carteira padrão na fase 2
+    all_tickers = _get_all_tickers()
+    if not all_tickers:
+        logger.warning("Nenhum ativo cadastrado para monitoramento. O pipeline não encontrará tickers relacionados.")
+        all_tickers = []
 
-    for carteira in Carteira.objects.filter(ativos=asset).select_related("usuario"):
-        Alerta.objects.get_or_create(usuario=carteira.usuario, noticia=article, ativo=asset)
-
-
-def _ensure_article_summary(article_id: int, title: str, description: str, content: str) -> None:
-    article = Noticia.objects.filter(id=article_id).first()
-    if not article:
-        return
-    if article.resumo:
-        return
-
-    summary_result = summarize_article(title, description, content)
-    summary_text = (summary_result.get("summary") or "").strip()
-    article.resumo = summary_text
-    article.resumo_status = summary_result.get("status", "ok")
-    article.resumo_provider = summary_result.get("provider", "")
-    article.resumo_em = datetime.now(timezone.utc)
-    article.save(update_fields=["resumo", "resumo_status", "resumo_provider", "resumo_em"])
-
-
-def _ensure_article_classification(
-    article_id: int,
-    title: str,
-    description: str,
-    content: str,
-    assets: list | None = None,
-) -> NoticiaClassificacao | None:
-    return _ensure_article_classification_force(
-        article_id, title, description, content, assets=assets, force=False
-    )
-
-
-def _ensure_article_classification_force(
-    article_id: int,
-    title: str,
-    description: str,
-    content: str,
-    assets: list | None = None,
-    force: bool = False,
-) -> NoticiaClassificacao | None:
-    if not settings.ENABLE_STRUCTURED_CLASSIFICATION and not force:
-        return None
-
-    article = Noticia.objects.filter(id=article_id).first()
-    if not article:
-        return None
-
-    existing = NoticiaClassificacao.objects.filter(noticia=article).first()
-    if existing:
-        return existing
-
-    classification = classify_article(title, description, content, assets or [])
-    classificacao, _ = NoticiaClassificacao.objects.update_or_create(
-        noticia=article,
-        defaults={
-            "sentimento": classification.get("sentimento", "neutro"),
-            "impacto": classification.get("impacto", "medio"),
-            "urgencia": classification.get("urgencia", "media"),
-            "setor": classification.get("setor", ""),
-            "tipo_evento": classification.get("tipo_evento", "outro"),
-            "tickers_relacionados": classification.get("tickers_relacionados", []),
-            "relevancia_llm": classification.get("relevancia_llm", 0.0),
-            "provider": classification.get("provider", ""),
-            "status": classification.get("status", "ok"),
-        },
-    )
-    return classificacao
-
-
-def _get_fonte_confiabilidade(feed_url: str | None) -> float | None:
-    if not feed_url:
-        return None
-    fonte = FonteRSS.objects.filter(url__iexact=feed_url).first()
-    if not fonte:
-        return None
-    return fonte.confiabilidade
-
-
-def _score_and_alert_users(
-    article: Noticia,
-    matched_asset_ids: list[int],
-    classification: NoticiaClassificacao | None,
-    feed_url: str | None,
-) -> None:
-    if not matched_asset_ids or not classification:
-        return
-
-    asset_id_set = set(matched_asset_ids)
-    carteiras = (
-        Carteira.objects.filter(ativos__in=matched_asset_ids)
-        .select_related("usuario")
-        .prefetch_related("ativos")
-        .distinct()
-    )
-    if not carteiras:
-        return
-
-    perfis = {
-        perfil.usuario_id: perfil
-        for perfil in PerfilInvestidor.objects.filter(usuario__in=[carteira.usuario for carteira in carteiras])
-    }
-    fonte_confiabilidade = _get_fonte_confiabilidade(feed_url)
-
-    for carteira in carteiras:
-        usuario = carteira.usuario
-        perfil = perfis.get(usuario.id)
-        carteira_assets = [asset for asset in carteira.ativos.all() if asset.id in asset_id_set]
-        carteira_tickers = [asset.ticker for asset in carteira_assets]
-
-        score_data = calculate_relevance_score(
-            classification,
-            perfil=perfil,
-            carteira_tickers=carteira_tickers,
-            fonte_confiabilidade=fonte_confiabilidade,
-        )
-        NoticiaScore.objects.update_or_create(
-            noticia=article,
-            usuario=usuario,
-            defaults={
-                "score_final": score_data["score_final"],
-                "prioridade": score_data["prioridade"],
-                "motivos": score_data["motivos"],
-            },
-        )
-        logger.info(
-            "Score calculado: noticia_id=%s usuario_id=%s prioridade=%s score=%s",
-            article.id,
-            usuario.id,
-            score_data["prioridade"],
-            score_data["score_final"],
-        )
-
-        min_priority = settings.ALERT_MIN_PRIORITY
-        if perfil and getattr(perfil, "alerta_min_prioridade", None):
-            min_priority = perfil.alerta_min_prioridade
-
-        if not is_priority_at_least(score_data["prioridade"], min_priority):
-            continue
-
-        for asset in carteira_assets:
-            Alerta.objects.get_or_create(usuario=usuario, noticia=article, ativo=asset)
-            logger.info(
-                "Alerta criado por prioridade: noticia_id=%s usuario_id=%s ativo_id=%s",
-                article.id,
-                usuario.id,
-                asset.id,
-            )
-
-
-def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
-    watch_terms = {asset["code"]: {"name": asset.get("name", ""), "id": asset.get("id")} for asset in watch_assets}
     cutoff = None
     if within_days is not None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
@@ -342,121 +147,182 @@ def check_feeds_and_report(feed_urls, watch_assets, within_days=None):
                 logger.debug("Ignorando artigo já visto ou sem link: %s", link or entry.get("title") or "sem-link")
                 continue
 
-            # O parser já retorna texto limpo (sem HTML, sem entidades)
+            # Extrai texto limpo (os parsers já retornam texto sem HTML)
             title = (entry.get("title") or "").strip()
             description_full = (entry.get("description") or "").strip()
-            content_full = (entry.get("content") or "").strip()      # string, não lista
-
-            # Fallback: se descrição estiver vazia, usa o início do conteúdo
+            content_full = (entry.get("content") or "").strip()
             if not description_full and content_full:
                 description_full = content_full[:500]
 
-            # Trunca conforme configuração
             description = description_full[:settings.ARTICLE_DESCRIPTION_MAX_CHARS] if description_full else ""
             content = content_full[:settings.ARTICLE_CONTENT_MAX_CHARS] if content_full else ""
 
-            # Log para debug (pode ser removido em produção)
-            logger.debug(
-                "Artigo: title=%s, desc_len=%d, content_len=%d, link=%s",
-                title, len(description), len(content), link
-            )
+            # Monta dicionário para o pipeline
+            noticia_dict = {
+                "id": None,
+                "titulo": title,
+                "descricao": description,
+                "conteudo": content,
+                "link": link,
+            }
 
-            # Matches superficiais (ticker, nome, alias)
-            title_matches = _find_matches_in_text(title, watch_terms)
-            description_matches = _find_matches_in_text(description_full, watch_terms) if description_full else []
-            content_matches = _find_matches_in_text(content_full, watch_terms) if content_full else []
-            matches = _unique_matches(title_matches, description_matches, content_matches)
+            try:
+                # Executa pipeline (fases 1 a 5)
+                pipeline_result = processar_noticia_completa(
+                    noticia=noticia_dict,
+                    carteira_usuario=all_tickers,
+                )
+            except Exception as e:
+                logger.exception("Erro no pipeline para notícia %s: %s", title, e)
+                continue
 
-            if description_matches and not title_matches:
-                logger.debug("Menção apenas na descrição: %s | %s", title, [c for c, _ in description_matches])
-            if content_matches and not title_matches:
-                logger.debug("Menção apenas no conteúdo: %s | %s", title, [c for c, _ in content_matches])
-            if not matches:
-                logger.debug("Nenhuma correspondência local para artigo: %s", title)
-
-            # Persiste a notícia mesmo sem matches (apenas para histórico)
+            # Persiste a notícia no banco (mesmo se irrelevante)
             raw_data = _safe_raw_data(entry.get("raw"))
-            mark_article_seen(link, int(published.timestamp()), raw_data=raw_data)
-            article_id = save_article(
+            published_ts = int(published.timestamp())
+            article = _save_article_with_pipeline_result(
                 link=link,
                 title=title,
-                description=description or content,   # se desc vazia, usa conteúdo
-                published_ts=int(published.timestamp()),
+                description=description,
+                content=content,
+                published_ts=published_ts,
                 feed_url=feed_url,
                 raw_data=raw_data,
-                content=content,                      # salva conteúdo limpo (se campo existir)
+                pipeline_result=pipeline_result,
             )
-
-            if not matches or not article_id:
-                logger.debug("Artigo persistido sem alerta: %s", title)
+            if not article:
                 continue
 
-            if not title_matches:
-                logger.debug("Menção fora do título, validando com IA: %s", title)
-
-            assets_for_llm = [
-                {"id": watch_terms[code].get("id"), "code": code, "name": name}
-                for code, name in matches
-            ]
-            logger.info(
-                "Enviando artigo para avaliacao da IA: title=%s matches=%s",
-                title, [code for code, _ in matches]
-            )
-
-            # LLM barata para relevância binária
-            ai_result = is_relevant(title, description, content, assets_for_llm)
-            logger.info(
-                "Resultado IA: relevant=%s matched=%s reason=%s",
-                ai_result.get("relevant"), ai_result.get("matched"), ai_result.get("reason", "")
-            )
-
-            if not ai_result.get("relevant"):
-                logger.info("Artigo rejeitado pela relevância: %s | %s", title, ai_result.get("reason", ""))
+            # Se a notícia não for relevante, não geramos alertas
+            if not pipeline_result.get("relevancia_binaria"):
+                logger.info("Notícia irrelevante (relevancia_binaria=0): %s", title)
                 continue
 
-            # Filtra apenas os códigos que realmente deram match local
-            local_codes = {code for code, _ in matches}
-            matched_codes = [
-                code for code in (ai_result.get("matched") or [code for code, _ in matches])
-                if code in watch_terms and code in local_codes
-            ]
-            if not matched_codes:
-                logger.warning("IA sinalizou relevância sem coincidência local: %s | %s", title, ai_result.get("matched", []))
+            tickers_relacionados = pipeline_result.get("tickers_relacionados", [])
+            if not tickers_relacionados:
+                logger.info("Nenhum ticker relacionado para notícia relevante: %s", title)
+                # Ainda assim, podemos notificar por categoria? (opcional)
+                # Por ora, não geramos alertas.
                 continue
 
-            # Gera resumo e classificação estruturada
-            _ensure_article_summary(article_id, title, description, content)
+            # IDs dos ativos correspondentes
+            asset_ids = list(Ativo.objects.filter(ticker__in=tickers_relacionados).values_list('id', flat=True))
+            if not asset_ids:
+                logger.info("Nenhum ativo cadastrado para os tickers relacionados: %s", tickers_relacionados)
+                continue
 
-            matched_asset_ids = [
-                watch_terms[code].get("id")
-                for code in matched_codes
-                if watch_terms[code].get("id") is not None
-            ]
+            # Usuários que possuem esses ativos em suas carteiras
+            carteiras = Carteira.objects.filter(ativos__in=asset_ids).distinct()
+            perfis = {p.usuario_id: p for p in PerfilInvestidor.objects.filter(usuario__in=[c.usuario_id for c in carteiras])}
 
-            classification = None
-            if settings.ENABLE_PRIORITY_ENGINE:
-                classification = _ensure_article_classification_force(
-                    article_id, title, description, content,
-                    assets=assets_for_llm, force=True
+            for carteira in carteiras:
+                usuario = carteira.usuario
+                perfil = perfis.get(usuario.id)
+                perfil_dict = _convert_perfil(perfil) if perfil else None
+
+                # Fase 6 – decisão personalizada por usuário
+                try:
+                    decision = decidir_alerta(
+                        noticia=pipeline_result,
+                        perfil=perfil_dict,
+                        config=None,  # usa a config global (carregada internamente)
+                    )
+                except Exception as e:
+                    logger.exception("Erro na fase 6 para usuário %s: %s", usuario.id, e)
+                    continue
+
+                prioridade = decision.get("prioridade", "baixa")
+                acoes = decision.get("acao_sugerida", [])
+                score_final = decision.get("score_final", 0.0)
+                explicacao_regra = decision.get("explicacao_regra", "")
+
+                # Salva o score personalizado
+                NoticiaScore.objects.update_or_create(
+                    noticia=article,
+                    usuario=usuario,
+                    defaults={
+                        "score_final": score_final,
+                        "prioridade": prioridade,
+                        "motivos": {"explicacao_regra": explicacao_regra, "acoes": acoes},
+                    },
                 )
-                article = Noticia.objects.filter(id=article_id).first()
-                if article:
-                    _score_and_alert_users(article, matched_asset_ids, classification, feed_url)
-            else:
-                _ensure_article_classification(article_id, title, description, content, assets_for_llm)
-                for code in set(matched_codes):
-                    asset_id = watch_terms[code].get("id")
-                    if asset_id is None:
-                        continue
-                    link_article_match(article_id, asset_id)
-                    logger.info("Alerta persistido: title=%s codigo=%s asset_id=%s", title, code, asset_id)
 
+                # Verifica prioridade mínima para gerar alerta
+                min_priority = getattr(settings, "ALERT_MIN_PRIORITY", "media")
+                if perfil and hasattr(perfil, "alerta_min_prioridade"):
+                    min_priority = perfil.alerta_min_prioridade
+
+                if is_priority_at_least(prioridade, min_priority):
+                    # Ativos do usuário que estão na lista de relacionados
+                    user_assets = Ativo.objects.filter(carteiras__usuario=usuario, id__in=asset_ids)
+                    for asset in user_assets:
+                        Alerta.objects.get_or_create(usuario=usuario, noticia=article, ativo=asset)
+                        logger.info("Alerta criado: noticia_id=%s usuario_id=%s ativo_id=%s", article.id, usuario.id, asset.id)
+
+            # Relatório (para compatibilidade com a saída antiga)
             reports.append({
                 "published": published.isoformat(),
                 "title": title,
                 "link": link,
-                "matches": [(code, watch_terms.get(code, {}).get("name")) for code in matched_codes],
-                "reason": ai_result.get("reason", ""),
+                "matches": [(ticker, "") for ticker in tickers_relacionados],
+                "reason": pipeline_result.get("explicacao", ""),
             })
 
     return reports
+
+def _save_article_with_pipeline_result(link, title, description, content, published_ts, feed_url, raw_data, pipeline_result):
+    """Salva a notícia e seus metadados enriquecidos pelo pipeline."""
+    published_at = datetime.fromtimestamp(published_ts, tz=timezone.utc) if published_ts else None
+    defaults = {
+        "titulo": title,
+        "descricao": description,
+        "publicado_em": published_at,
+        "feed_url": feed_url or "",
+        "impacto": pipeline_result.get("impacto", "pendente"),
+        "raw_data": raw_data,
+        "conteudo": content if hasattr(Noticia, 'conteudo') else None,
+        "relevancia_binaria": pipeline_result.get("relevancia_binaria", False),
+    }
+    # Campos adicionais que podem ser salvos diretamente na notícia (se existirem no modelo)
+    extra_fields = [
+        "relevancia_global", "score_heuristico", "sentimento", "urgencia", "categoria", "explicacao"
+    ]
+    for field in extra_fields:
+        if field in pipeline_result and hasattr(Noticia, field):
+            defaults[field] = pipeline_result[field]
+
+    article, _ = Noticia.objects.update_or_create(link=link, defaults=defaults)
+
+    # Salva classificação estruturada (NoticiaClassificacao)
+    if pipeline_result.get("sentimento"):
+        # Mapeia urgencia (int) para string (se necessário)
+        urgencia_int = pipeline_result.get("urgencia", 5)
+        if urgencia_int >= 7:
+            urgencia_str = "alta"
+        elif urgencia_int >= 4:
+            urgencia_str = "media"
+        else:
+            urgencia_str = "baixa"
+
+        # Prepara os dados para update_or_create
+        classificacao_defaults = {
+            "sentimento": pipeline_result.get("sentimento", "neutro"),
+            "impacto": pipeline_result.get("impacto", "medio"),
+            "urgencia": urgencia_str,
+            "setor": pipeline_result.get("categoria", ""),
+            "tipo_evento": "noticia",
+            "tickers_relacionados": pipeline_result.get("tickers_relacionados", []),
+            "tickers_encontrados": pipeline_result.get("tickers_encontrados", []),   # NOVO
+            "explicacao": pipeline_result.get("explicacao", ""),                     # NOVO
+            "relevancia_llm": pipeline_result.get("relevancia_global", 0.0),
+            "confianca_fase4": pipeline_result.get("confianca_fase4", 0.0),          # NOVO
+            "provider_fase4": pipeline_result.get("provider_fase4", ""),             # NOVO
+            "provider": "motor_inteligente",
+            "status": "ok",
+        }
+        NoticiaClassificacao.objects.update_or_create(
+            noticia=article,
+            defaults=classificacao_defaults
+        )
+
+    # (O resumo pode ser gerado posteriormente, se necessário)
+    return article
