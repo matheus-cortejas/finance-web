@@ -1,110 +1,216 @@
-Projeto: monitor de notícias por ativos com Django
+# Monitor Financeiro
 
-Como usar:
+Sistema de monitoramento de notícias financeiras com classificação inteligente via IA. Coleta notícias de feeds RSS, processa por um pipeline de 6 fases (embeddings + heurísticas + LLM) e gera alertas personalizados por perfil de investidor.
 
-1. Instale as dependências na `venv`:
+## Como usar
+
+### 1. Instale as dependências
 
 ```bash
+python -m venv venv
 ./venv/bin/python -m pip install -r requirements.txt
 ```
 
-2. Prepare o banco de dados:
+### 2. Configure as variáveis de ambiente
+
+Crie um arquivo `.env` na raiz do projeto:
+
+```env
+OPENAI_API_KEY=sk-...          # Opcional — sem ela, as fases LLM usam fallback heurístico
+DJANGO_START_MONITOR=1         # Auto-inicia o monitor ao rodar o servidor
+DJANGO_START_SCHEDULER=1       # Auto-inicia o scheduler ao rodar o servidor
+MONITOR_INTERVAL_SECONDS=300   # Intervalo de coleta recorrente (segundos)
+```
+
+### 3. Prepare o banco de dados
 
 ```bash
 ./venv/bin/python manage.py migrate
 ```
 
-3. Crie um usuario para login:
+### 4. Crie um usuário
 
 ```bash
 ./venv/bin/python manage.py createsuperuser
 ```
 
-4. Execute a interface web:
+### 5. Execute o servidor
 
 ```bash
 ./venv/bin/python manage.py runserver
 ```
 
-5. Inicie a coleta manual quando precisar atualizar a base e processar feeds:
+Acesse `http://localhost:8000/` — redireciona para o dashboard (autenticado) ou login.
+
+### 6. Coleta manual de notícias
 
 ```bash
-./venv/bin/python manage.py run_monitor --b3-csv ~/Downloads/IBOVDia_24-03-26.csv --rss ~/Downloads/rss.txt
+./venv/bin/python manage.py run_monitor
 ```
 
-Esse comando popula a base de ativos e dispara a verificação inicial. A inclusão de ativos na watchlist agora acontece pela dashboard Django.
+Popula a base de ativos (JSON → S&P500 → B3 CSV) e dispara a coleta inicial dos feeds RSS.
 
-6. Para manter o polling recorrente em execução:
+### 7. Coleta recorrente (scheduler)
 
 ```bash
-./venv/bin/python manage.py run_scheduler --rss ~/Downloads/rss.txt
+./venv/bin/python manage.py run_scheduler
 ```
 
-7. Rode os testes:
+Mantém o APScheduler em background, coletando notícias a cada `MONITOR_INTERVAL_SECONDS`.
+
+### 8. Pipeline Lab (staff)
+
+Acesse `/lab/` para testar o pipeline completo com notícias arbitrárias sem persistir dados.
+
+## Pipeline Inteligente (6 fases)
+
+```
+Notícia → Fase 1 → Fase 2 → Fase 3 → Fase 4 → Fase 5 → Fase 6 → Alerta
+           Filtro    Match    Heuríst.  LLM Gate  Classif.  Decisor
+           Global    Ticker   Scoring   (binário)  Rich      Engine
+```
+
+| Fase | O que faz |
+|------|-----------|
+| **1. Filtro Global** | Embeddings (sentence-transformers) contra 5 centroides temáticas; rejeita notícias irrelevantes |
+| **2. Match de Tickers** | Similaridade semântica entre a notícia e os ativos da carteira do usuário |
+| **3. Heurística** | Scoring por regras (menção direta, setor, palavras-chave macro, urgência, etc.) |
+| **4. LLM Gate** | Decisão binária via OpenAI apenas para o "zona cinza" (score 3–6); alta/baixa bypassam a LLM |
+| **5. Classificação Rich** | Sentimento, impacto, urgência, categoria — via LLM com fallback por keywords |
+| **6. Decisor** | Regras configuráveis (YAML) → prioridade (CRITICAL/HIGH/MEDIUM/LOW) + canais de notificação |
+
+O custo da LLM é controlado: Fases 4 e 5 só chamam a API quando o score cai na zona cinza.
+
+## Modelos de dados
+
+| Modelo | Descrição |
+|--------|-----------|
+| **Ativo** | Ativo financeiro (ticker, nome, fonte) |
+| **Carteira** | Carteira do usuário (1:1 com User, M2M com Ativo) |
+| **Noticia** | Artigo coletado (link, título, conteúdo, resumo, impacto) |
+| **NoticiaClassificacao** | Classificação LLM por artigo (sentimento, impacto, urgência, categoria) |
+| **NoticiaScore** | Score personalizado por usuário+notícia |
+| **PerfilInvestidor** | Perfil (risco, horizonte, setores, sensibilidade, frequência) |
+| **InteracaoNoticia** | Tracking de interação (abriu, ignorou, tempo de leitura) |
+| **FonteRSS** | Fonte RSS (URL, nome, confiabilidade, ativa) |
+| **Alerta** | Alerta gerado por usuário+notícia+ativo(s) |
+
+## Rotas da aplicação
+
+| URL | Descrição |
+|-----|-----------|
+| `/dashboard/` | Dashboard principal (métricas, gráficos, carteira, ranking, alertas) |
+| `/noticias/` | Lista paginada de notícias com filtros |
+| `/noticia/<id>/` | Detalhe da notícia com classificação completa |
+| `/meus-alertas/` | Alertas do usuário com filtros de prioridade/ticker |
+| `/register/` | Cadastro de usuário |
+| `/lab/` | Pipeline Lab (staff) |
+| `/admin/` | Django Admin |
+
+## Estrutura do projeto
+
+```
+finance-web/
+├── setup/                  # Configuração Django (settings, URLs, WSGI/ASGI, logging)
+├── core/
+│   ├── models.py           # Modelos de domínio
+│   ├── views.py            # Views web
+│   ├── urls.py             # Rotas do app
+│   ├── forms.py            # Formulários
+│   ├── signals.py          # Signals Django
+│   ├── apps.py             # AppConfig (auto-start monitor/scheduler)
+│   ├── startup.py          # Bootstrap em background
+│   ├── intelligent_motor/  # Pipeline de 6 fases (embeddings, heurística, LLM)
+│   ├── llm/                # Camada de compatibilidade (delega para intelligent_motor)
+│   ├── services/           # Regra de negócio (notícias, scoring, interações, ativos)
+│   ├── parsers/            # Parsing de feeds RSS
+│   ├── scheduler/          # APScheduler (coleta recorrente)
+│   ├── management/commands/# run_monitor, run_scheduler
+│   └── migrations/         # Migrações do banco
+├── pipeline_lab/           # App staff para testar o pipeline
+├── templates/              # Templates HTML (Bootstrap 5 + Chart.js)
+├── static/                 # CSS, JS, assets estáticos
+├── scripts/                # Scripts utilitários (export, embeddings, dataset)
+├── logs/                   # Logs da aplicação (criar manualmente)
+├── manage.py               # CLI do Django
+├── core_ativos.json        # Base de ativos pré-construída
+├── IBOVDia_24-03-26.csv    # Dados B3
+├── rss.txt                 # Lista de feeds RSS
+└── requirements.txt        # Dependências
+```
+
+## Variáveis de ambiente
+
+| Variável | Padrão | Descrição |
+|----------|--------|-----------|
+| `OPENAI_API_KEY` | — | Chave da OpenAI (sem ela, fallback heurístico) |
+| `OPENAI_MODEL` | `gpt-4.1-mini` | Modelo para Fase 4 |
+| `DJANGO_START_MONITOR` | `1` | Auto-iniciar monitor no `runserver` |
+| `DJANGO_START_SCHEDULER` | `1` | Auto-iniciar scheduler no `runserver` |
+| `MONITOR_INTERVAL_SECONDS` | `300` | Intervalo de coleta recorrente |
+| `ARTICLE_RETENTION_DAYS` | `1` | Janela temporal da coleta inicial |
+| `ASSETS_JSON_PATH` | `core_ativos.json` | Caminho para base de ativos JSON |
+| `B3_CSV_PATH` | `IBOVDia_24-03-26.csv` | Caminho para CSV da B3 |
+| `RSS_PATH` | `rss.txt` | Caminho para lista de feeds RSS |
+| `LOG_FILE_PATH` | `logs/monitor.log` | Caminho do arquivo de log |
+
+## Scripts utilitários
 
 ```bash
-./venv/bin/python -m unittest discover -s tests -p 'test_*.py' -v
+# Testar parser RSS
+./venv/bin/python scripts/test_rss.py
+
+# Listar tickers registrados
+./venv/bin/python scripts/listar_tickers.py
+
+# Exportar notícias para JSON
+./venv/bin/python scripts/export_notices.py
+
+# Pré-gerar embeddings dos ativos (Fase 2)
+./venv/bin/python scripts/popular_embeddings_agora.py
+
+# Construir dataset para treino/avaliação
+./venv/bin/python scripts/build_dataset.py
 ```
 
-## Como o projeto funciona
+## Observações
 
-### Fluxo principal
+- A LLM é opcional; sem `OPENAI_API_KEY`, o pipeline usa fallback heurístico por keywords.
+- O auto-start do monitor/scheduler no `runserver` é controlado pelas env vars `DJANGO_START_MONITOR` e `DJANGO_START_SCHEDULER`. Em produção, o scheduler deve rodar em um container separado.
+- Crie a pasta `logs/` manualmente antes de rodar o servidor, caso não exista.
+- O logout usa `POST` com CSRF para evitar `405 Method Not Allowed`.
+- Os alertas recentes abrem a notícia em nova aba.
+- O perfil adaptativo do usuário é ajustado automaticamente com base nas interações (abrir/ignorar notícias).
+- Métricas do pipeline são exportadas via JSONL para análise de performance.
 
-1. O Django sobe com as configurações de [setup/settings.py](setup/settings.py), carrega `.env`, configura o SQLite, o logging e o startup automático do monitor.
-2. Quando o servidor inicia, [core/apps.py](core/apps.py) aciona [core/startup.py](core/startup.py), que pode iniciar o monitor e o scheduler em background sem travar o `runserver`.
-3. A home redireciona para login quando o usuario nao esta autenticado e para o dashboard quando ja existe sessao.
-4. O comando [manage.py run_monitor](core/management/commands/run_monitor.py) executa [core/management/workflows.py](core/management/workflows.py), que popula a base de ativos e faz uma coleta inicial dos feeds.
-5. O comando [manage.py run_scheduler](core/management/commands/run_scheduler.py) sobe o APScheduler e mantém a varredura recorrente em execução.
-6. A coleta passa por [core/scheduler/jobs.py](core/scheduler/jobs.py), que busca a watchlist atual, chama o serviço de notícias e limpa artigos antigos.
-7. O processamento das notícias fica em [core/services/noticia_service.py](core/services/noticia_service.py), que faz o parsing, filtra relevância, salva notícias, gera resumo e cria alertas.
-8. A relevância é avaliada em [core/llm/openai_client.py](core/llm/openai_client.py) e [core/llm/relevance.py](core/llm/relevance.py). Se não houver chave da OpenAI, o sistema cai para a heurística por menção de ticker/nome.
-9. O usuário usa [core/views.py](core/views.py) e os templates em `templates/core/` para navegar entre login e dashboard.
+## Pendências
 
-### Mapa da codebase
+### Críticas
 
-- [setup/](setup/) concentra o projeto Django: settings, URLs, WSGI e ASGI.
-- [core/models.py](core/models.py) guarda o domínio persistido: ativos, carteiras, notícias e alertas.
-- [core/services/](core/services/) concentra a regra de negócio e a integração com banco, RSS e LLM.
-- [core/parsers/](core/parsers/) isola a leitura de feeds RSS e a eventual adaptação de outras fontes.
-- [core/scheduler/](core/scheduler/) define a agenda de coleta recorrente e a limpeza automática.
-- [core/management/commands/](core/management/commands/) expõe os fluxos operacionais via Django management commands.
-- [core/views.py](core/views.py) e `templates/` implementam a experiência web autenticada e o dashboard.
-- [tests/](tests/) cobre models, serviços, scheduler, comandos e telas web.
-- [setup/logger.py](setup/logger.py) concentra o logging compartilhado pela aplicação.
+- **Tests mocks funções que não existem** — `summarize_article`, `is_relevant`, `create_parser` em `core/tests.py` não existem em `noticia_service.py`. Os testes são de uma arquitetura anterior e vão falhar.
 
-### O que aparece nos logs
+### Altas
 
-- Inicialização do monitor, carregamento do CSV B3 e da base S&P 500.
-- Execução da coleta inicial e das coletas recorrentes do scheduler.
-- Cada feed RSS visitado, cada notícia filtrada e cada alerta persistido.
-- Ações de login, cadastro, busca de ativo e renderização do dashboard.
+- **Envio de e-mail/push não implementado** — `PerfilInvestidor` tem campos `notificacao_email`, `notificacao_push` e o Fase 6 define ações `["email", "push", "dashboard_destacado"]`, mas não existe infraestrutura de envio (sem `send_mail`, sem FCM, sem WebSocket).
+- **Geração de resumo não implementada** — `Noticia` tem campos `resumo`, `resumo_status` (default `"pendente"`), templates exibem o resumo, mas nenhum backend gera. O old README mencionava integração com OpenAI para isso.
+- **`CustomParser` para `.html` é stub** — `core/parsers/custom_parser.py` levanta `NotImplementedError`. A factory rota URLs `.html`/`.htm` para ele, o que vai quebrar se algum feed usar essa extensão.
+- **`STATIC_ROOT` comentado** em `setup/settings.py:133` — `collectstatic` vai falhar se executado.
 
-Os logs principais vão para o console e para [logs/monitor.log](logs/monitor.log).
+### Médias
 
-Estrutura atual:
-- `setup/`: configuração global do Django, rotas e settings.
-- `core/models.py`: models ORM para ativos, carteira, notícias e alertas.
-- `core/services/`: regras de negócio com acesso via ORM.
-- `core/parsers/`, `core/llm/` e `core/scheduler/`: parsing de feeds, análise de relevância e agendamento.
-- `core/management/commands/`: comandos `run_monitor` e `run_scheduler`.
-- `core/views.py`: dashboard autenticado do usuário.
-- `templates/`: base visual, login e dashboard.
-- [setup/logger.py](setup/logger.py): configuração central de logging.
-- `tests/`: suíte de regressão do projeto.
+- **Feature flags sem uso** — `ENABLE_STRUCTURED_CLASSIFICATION` definida mas nunca consumida. `ENABLE_PRIORITY_ENGINE` definida mas nunca verificada no código de produção.
+- **`scoring_service.py` órfão** — módulo completo (148 linhas) nunca chamado em produção. O scoring real é feito pelo `fase6_decisor/score_final.py` e `noticia_service.py`.
+- **Scripts com paths hardcoded errados** — `scripts/popular_embeddings_agora.py` e `scripts/listar_tickers.py` apontam para `C:/Users/matheusdossantos/finance-web` (falta `-web`).
+- **Duplicação de `is_priority_at_least`** — definida tanto em `scoring_service.py:72` quanto em `noticia_service.py:35`.
+- **Perfis adaptativos limitados** — `interacao_service.py` só ajusta `sensibilidade_negativo` e `setores_preferidos`. `horizonte`, `perfil_risco` e `frequencia_alertas` nunca são adaptados.
 
-Observações:
-- A LLM é opcional; sem `OPENAI_API_KEY`, o filtro cai para a heurística por menção.
-- Resumos são gerados automaticamente quando há alertas; sem OpenAI, o resumo usa fallback local.
-- O conteúdo enviado à LLM é truncado (configure `ARTICLE_DESCRIPTION_MAX_CHARS` e `ARTICLE_CONTENT_MAX_CHARS`).
-- Links de notícias são normalizados para remover parâmetros de tracking comuns.
-- O RSS continua sendo o parser padrão e a análise segue isolada nos serviços.
-- O diretório `src/` foi removido; a configuração e o logging vivem em `setup/`.
-- Para ajustar o caminho do arquivo de log, use `LOG_FILE_PATH`.
-- O auto-start do monitor e do scheduler no `runserver` é controlado por `DJANGO_START_MONITOR` e `DJANGO_START_SCHEDULER`.
-- O logout do dashboard usa `POST` com CSRF para evitar `405 Method Not Allowed`.
-- Os alertas recentes abrem a notícia em uma nova guia.
+### Baixas
 
-Arquivos úteis:
-- [REFACTORING_GUIDE.md](REFACTORING_GUIDE.md)
+- **Sem REST API** — todas as views servem HTML. Sem DRF, serializers, ou padrão `/api/`.
+- **Sem auth por token** — só session auth do Django. Sem JWT ou API keys para acesso programático.
+- **Signals subutilizados** — só `create_investor_profile` está conectado. Falta signal para recalcular scores, gerar resumos e enviar notificações.
+
+## Arquivos úteis
+
 - [requirements.txt](requirements.txt)
-# teste-api
+- [REFACTORING_GUIDE.md](REFACTORING_GUIDE.md)
