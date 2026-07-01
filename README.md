@@ -66,14 +66,14 @@ Acesse `/lab/` para testar o pipeline completo com notícias arbitrárias sem pe
 
 ```bash
 # Testes do core (views, modelos, scoring, integração)
-./venv/bin/python -m unittest core.tests -v
+./venv/bin/python -m python manage.py test core 
 
 # Testes do intelligent_motor (pipeline, fases, heurística, regras)
 ./venv/bin/python -m pytest core/intelligent_motor/ -v --import-mode=importlib
 
 # Todos
 ./venv/bin/python -m pytest core/intelligent_motor/ -v --import-mode=importlib && \
-./venv/bin/python -m unittest core.tests -v
+./venv/bin/python -m python manage.py test core 
 ```
 
 ## Pipeline Inteligente (6 fases)
