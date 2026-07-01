@@ -9,7 +9,7 @@ from .preprocessor import preprocessar_texto
 from .embedding_generator import EmbeddingGenerator
 from .cache_manager import get_cache_manager
 from .similarity import calcular_similaridade
-from .exceptions import ValidationError, ModelError
+from .exceptions import PipelineError, ValidationError, ModelError
 
 # ---------- Função auxiliar de fallback (apenas para compatibilidade) ----------
 def _load_config_from_file() -> Dict[str, Any]:

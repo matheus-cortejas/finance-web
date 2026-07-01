@@ -62,6 +62,20 @@ Mantém o APScheduler em background, coletando notícias a cada `MONITOR_INTERVA
 
 Acesse `/lab/` para testar o pipeline completo com notícias arbitrárias sem persistir dados.
 
+### 9. Rode os testes
+
+```bash
+# Testes do core (views, modelos, scoring, integração)
+./venv/bin/python -m unittest core.tests -v
+
+# Testes do intelligent_motor (pipeline, fases, heurística, regras)
+./venv/bin/python -m pytest core/intelligent_motor/ -v --import-mode=importlib
+
+# Todos
+./venv/bin/python -m pytest core/intelligent_motor/ -v --import-mode=importlib && \
+./venv/bin/python -m unittest core.tests -v
+```
+
 ## Pipeline Inteligente (6 fases)
 
 ```
@@ -121,7 +135,6 @@ finance-web/
 │   ├── apps.py             # AppConfig (auto-start monitor/scheduler)
 │   ├── startup.py          # Bootstrap em background
 │   ├── intelligent_motor/  # Pipeline de 6 fases (embeddings, heurística, LLM)
-│   ├── llm/                # Camada de compatibilidade (delega para intelligent_motor)
 │   ├── services/           # Regra de negócio (notícias, scoring, interações, ativos)
 │   ├── parsers/            # Parsing de feeds RSS
 │   ├── scheduler/          # APScheduler (coleta recorrente)
@@ -187,7 +200,7 @@ finance-web/
 
 ### Críticas
 
-- **Tests mocks funções que não existem** — `summarize_article`, `is_relevant`, `create_parser` em `core/tests.py` não existem em `noticia_service.py`. Os testes são de uma arquitetura anterior e vão falhar.
+(Nenhuma pendência crítica restante.)
 
 ### Altas
 

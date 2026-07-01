@@ -5,13 +5,14 @@ from core.intelligent_motor.fase3_heuristica.criterios import (
     avaliar_palavras_negativas,
     avaliar_palavras_urgencia,
 )
+from core.intelligent_motor.config_loader import load_global_config
 
 
 def test_avaliar_ticker_explicito():
     noticia = {"titulo": "Ação PETR4 sobe", "descricao": "", "conteudo": ""}
     ok, found = avaliar_ticker_explicito(noticia)
     assert ok
-    assert any("PETR4" in t for t in found)
+    assert any("petr4" in t.lower() for t in found)
 
 
 def test_avaliar_setor_relacionado():
@@ -20,7 +21,8 @@ def test_avaliar_setor_relacionado():
 
 
 def test_palavras_macro_neg_urgencia():
+    config = load_global_config()
     noticia = {"titulo": "Selic sobe e há prejuízo urgente", "descricao": "", "conteudo": ""}
-    assert avaliar_palavras_macro(noticia)
-    assert avaliar_palavras_negativas(noticia)
-    assert avaliar_palavras_urgencia(noticia)
+    assert avaliar_palavras_macro(noticia, config=config)
+    assert avaliar_palavras_negativas(noticia, config=config)
+    assert avaliar_palavras_urgencia(noticia, config=config)

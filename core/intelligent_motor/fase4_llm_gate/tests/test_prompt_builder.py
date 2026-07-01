@@ -14,4 +14,4 @@ def test_build_prompt_contains_fields():
     assert "Critérios ativados:" in prompt
     assert "- ticker_explicito" in prompt
     assert "- impacto" in prompt
-    assert re.search(r"Responda apenas '1' ou '0'", prompt)
+    assert re.search(r"classe\|confianca", prompt)

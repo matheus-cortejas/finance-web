@@ -209,7 +209,9 @@ def build_dataset(source_db: str, dataset_db: str, limit: int | None, reset: boo
     _ensure_django()
 
     from django.conf import settings
-    from core.llm.openai_client import classify_article, classify_article_heuristic
+    from core.intelligent_motor.config_loader import load_global_config
+    from core.intelligent_motor.fase5_rich_classification.fallback import fallback_classify
+    from core.intelligent_motor.fase5_rich_classification.pipeline import classificar_noticia_rica
     from core.models import Ativo, Noticia
 
     assets = list(Ativo.objects.values("id", "ticker", "nome", "source").order_by("ticker"))
@@ -281,16 +283,35 @@ def build_dataset(source_db: str, dataset_db: str, limit: int | None, reset: boo
                 for asset in matches
             ]
 
+            noticia_dict = {
+                "id": noticia.id,
+                "titulo": title,
+                "descricao": description,
+                "conteudo": content_for_llm,
+                "tickers_relacionados": [a.get("ticker", "") for a in matches if a.get("ticker")],
+            }
+            config = load_global_config()
+
             is_relevant = has_strong_match or has_medium_match
             if is_relevant:
-                classification = classify_article(title, description, content_for_llm, assets_for_llm)
-                classified_total += 1
+                noticia_dict["relevancia_binaria"] = 1
+                result = classificar_noticia_rica(noticia=noticia_dict, config=config)
             else:
-                classification = classify_article_heuristic(title, description, content_for_llm, assets_for_llm)
+                fase5_cfg = config.get("fase5", {})
+                result = fallback_classify(noticia=noticia_dict, config=fase5_cfg)
 
-            matched_tickers = [asset.get("ticker", "") for asset in matches if asset.get("ticker")]
-            if not classification.get("tickers_relacionados") and matched_tickers:
-                classification["tickers_relacionados"] = matched_tickers
+            classification = {
+                "sentimento": result.get("sentimento", ""),
+                "impacto": result.get("impacto", ""),
+                "urgencia": result.get("urgencia", ""),
+                "setor": result.get("categoria", ""),
+                "tipo_evento": result.get("categoria", ""),
+                "tickers_relacionados": result.get("tickers_relacionados", noticia_dict.get("tickers_relacionados", [])),
+                "relevancia_llm": 0.0,
+                "provider": "intelligent_motor",
+                "status": "ok",
+            }
+            classified_total += 1
 
             conn.execute(
                 "INSERT OR REPLACE INTO dataset_classificacao (noticia_id, sentimento, impacto, urgencia, setor, tipo_evento, tickers_relacionados, relevancia_llm, provider, status, classified_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
