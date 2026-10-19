@@ -182,6 +182,12 @@ class AssetEmbeddingStore:
     def get_embedding(self, ticker: str) -> Optional[List[float]]:
         return self.get_embeddings([ticker]).get(ticker)
 
+    def get_descriptions(
+        self, tickers: Optional[Iterable[str]] = None
+    ) -> Dict[str, str]:
+        """Texto descritivo de cada ativo (para cross-encoder / LLM da Fase 2)."""
+        return self._asset_descriptions(tickers)
+
     def list_tickers(self) -> List[str]:
         return list(self._load_cache().keys())
 

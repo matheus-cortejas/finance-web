@@ -261,6 +261,39 @@ class RunParamsTests(TestCase):
         with self.assertRaises(ValidationError):
             validate_overrides({"fase2": {"estrategia": "inventada"}})
 
+    def test_defaults_inclui_rerank_e_llm(self):
+        from pipeline_lab.services import run_params
+
+        padroes = run_params.defaults()
+        self.assertIn("rerank", padroes["fase2"])
+        self.assertIn("llm", padroes["fase2"])
+        self.assertIn("enabled", padroes["fase2"]["rerank"])
+        self.assertIn("provider", padroes["fase2"]["llm"])
+
+    def test_build_overrides_fase2_a3_a4(self):
+        from pipeline_lab.services.run_params import build_overrides
+
+        overrides = build_overrides(
+            {
+                "fase2_rerank_enabled": "on",
+                "fase2_rerank_threshold": "0,6",
+                "fase2_rerank_top_n": "15",
+                "fase2_llm_enabled": "on",
+                "fase2_llm_provider": "openai",
+            }
+        )
+        self.assertTrue(overrides["fase2"]["rerank"]["enabled"])
+        self.assertAlmostEqual(overrides["fase2"]["rerank"]["threshold"], 0.6)
+        self.assertEqual(overrides["fase2"]["rerank"]["top_n"], 15)
+        self.assertTrue(overrides["fase2"]["llm"]["enabled"])
+        self.assertEqual(overrides["fase2"]["llm"]["provider"], "openai")
+
+    def test_validate_rejeita_llm_provider_invalido(self):
+        from pipeline_lab.services.run_params import validate_overrides
+
+        with self.assertRaises(ValidationError):
+            validate_overrides({"fase2": {"llm": {"provider": "huggingface"}}})
+
     def test_build_overrides_com_centroides(self):
         from pipeline_lab.services.run_params import build_overrides
 

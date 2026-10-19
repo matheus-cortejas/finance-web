@@ -403,6 +403,7 @@ def _classification_defaults(result: dict, elapsed: float) -> dict:
         "relevancia_global": result.get("relevancia_global"),
         "tickers_relacionados": result.get("tickers_relacionados") or [],
         "tickers_encontrados": result.get("tickers_encontrados") or [],
+        "fase2_detalhes": result.get("fase2_detalhes") or {},
         "score_heuristico": result.get("score_heuristico"),
         "criterios_ativados": result.get("criterios_ativados") or [],
         "relevancia_binaria": result.get("relevancia_binaria"),

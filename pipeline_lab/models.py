@@ -75,6 +75,8 @@ class RunClassification(models.Model):
 
     tickers_relacionados = models.JSONField(default=list, blank=True)
     tickers_encontrados = models.JSONField(default=list, blank=True)
+    # Diagnóstico da Fase 2 (estratégia, reranking A3, LLM A4).
+    fase2_detalhes = models.JSONField(default=dict, blank=True)
 
     score_heuristico = models.IntegerField(null=True, blank=True)
     criterios_ativados = models.JSONField(default=list, blank=True)

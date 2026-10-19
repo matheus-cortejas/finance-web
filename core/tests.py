@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -687,3 +688,233 @@ class Fase2GatingTests(TestCase):
             aplicar_estrategia("similaridade", ["PETR4", "VALE3"], noticia, {}),
             ["PETR4", "VALE3"],
         )
+
+
+def _fake_llm_client(content):
+    """Cliente OpenAI-compatível falso, retornando ``content``."""
+    message = SimpleNamespace(content=content)
+
+    class _Completions:
+        def create(self, **kwargs):
+            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=_Completions()))
+
+
+class RerankTests(TestCase):
+    def test_selecionar_por_score_ordena_e_filtra(self):
+        from core.intelligent_motor.fase2_tickers.rerank import (
+            selecionar_por_score,
+        )
+
+        self.assertEqual(
+            selecionar_por_score(["A", "B", "C"], [0.1, 0.9, 0.5], 0.5),
+            ["B", "C"],
+        )
+        # Nenhum passa: mantém o melhor por padrão.
+        self.assertEqual(
+            selecionar_por_score(["A", "B"], [0.1, 0.2], 0.9), ["B"]
+        )
+        self.assertEqual(
+            selecionar_por_score(["A", "B"], [0.1, 0.2], 0.9, manter_minimo=0),
+            [],
+        )
+
+    def test_rerankar_com_modelo_fake(self):
+        from core.intelligent_motor.fase2_tickers import rerank
+
+        class FakeReranker:
+            def score(self, pares):
+                return [0.9, 0.1]
+
+        with patch.object(
+            rerank.CrossEncoderReranker, "instance", return_value=FakeReranker()
+        ):
+            resultado = rerank.rerankar(
+                "texto", ["PETR4", "VALE3"], {"PETR4": "p"}, threshold=0.5
+            )
+        self.assertEqual(resultado, ["PETR4"])
+
+    def test_rerankar_indisponivel_retorna_none(self):
+        from core.intelligent_motor.fase2_tickers import rerank
+
+        with patch.object(
+            rerank.CrossEncoderReranker,
+            "instance",
+            side_effect=RuntimeError("modelo indisponível"),
+        ):
+            self.assertIsNone(
+                rerank.rerankar("texto", ["PETR4"], {"PETR4": "p"})
+            )
+
+
+class LLMPickerTests(TestCase):
+    def test_extrair_tickers_formatos(self):
+        from core.intelligent_motor.fase2_tickers.llm_picker import (
+            extrair_tickers,
+        )
+
+        universo = ["PETR4", "VALE3"]
+        self.assertEqual(
+            extrair_tickers('{"tickers": ["PETR4"]}', universo), ["PETR4"]
+        )
+        self.assertEqual(
+            extrair_tickers('["VALE3", "XPTO"]', universo), ["VALE3"]
+        )
+        self.assertEqual(
+            extrair_tickers("Afeta PETR4 e VALE3.", universo), ["PETR4", "VALE3"]
+        )
+        self.assertEqual(extrair_tickers('{"tickers": []}', universo), [])
+        self.assertEqual(extrair_tickers("nenhum", universo), [])
+        self.assertIsNone(extrair_tickers("resposta ambígua", universo))
+
+    def test_escolher_com_cliente_local(self):
+        from core.intelligent_motor.fase2_tickers.llm_picker import LLMPicker
+
+        picker = LLMPicker({"provider": "local", "model": "fake"})
+        picker.client = _fake_llm_client('{"tickers": ["PETR4"]}')
+        tickers, provider = picker.escolher(
+            "texto", [("PETR4", "d"), ("VALE3", "d")]
+        )
+        self.assertEqual(tickers, ["PETR4"])
+        self.assertEqual(provider, "local")
+
+    def test_escolher_escala_quando_local_falha(self):
+        from core.intelligent_motor.fase2_tickers.llm_picker import LLMPicker
+
+        picker = LLMPicker(
+            {"provider": "local", "escalar_para": {"provider": "openai"}}
+        )
+        picker.client = _fake_llm_client(None)  # local não responde
+        with patch.object(
+            LLMPicker,
+            "_cliente_escalada",
+            return_value=(
+                _fake_llm_client('{"tickers": ["VALE3"]}'),
+                "gpt-4o-mini",
+                "openai",
+            ),
+        ):
+            tickers, provider = picker.escolher(
+                "texto", [("PETR4", "d"), ("VALE3", "d")]
+            )
+        self.assertEqual(tickers, ["VALE3"])
+        self.assertEqual(provider, "openai")
+
+
+class Fase2RerankLLMTests(TestCase):
+    """A3/A4 integrados ao ``relacionar_tickers``."""
+
+    EMBS = {
+        "PETR4": [1.0, 0.0, 0.0],
+        "BRKM5": [0.8, 0.6, 0.0],
+        "VALE3": [0.6, 0.8, 0.0],
+    }
+    DESCR = {
+        "PETR4": "Petrobras petróleo",
+        "BRKM5": "Braskem químicos",
+        "VALE3": "Vale mineração",
+    }
+
+    def _run(self, fase2, detalhes=None, rerankar_return=None, picker=None):
+        from core.intelligent_motor.fase2_tickers import pipeline
+
+        embeddings = dict(self.EMBS)
+        descricoes = dict(self.DESCR)
+
+        class DummyStore:
+            def get_matrix(self, tickers):
+                return (None, None)
+
+            def get_embeddings(self, tickers):
+                return {t: embeddings[t] for t in tickers if t in embeddings}
+
+            def get_descriptions(self, tickers):
+                tickers = list(tickers)
+                return {t: descricoes.get(t, t) for t in tickers}
+
+        noticia = {
+            "id": 1,
+            "titulo": "Petrobras anuncia resultados",
+            "descricao": "",
+            "conteudo": "",
+            "embedding_noticia": [1.0, 0.0, 0.0],
+        }
+        picker_cls = MagicMock(return_value=picker)
+        with patch.object(
+            pipeline, "get_asset_embedding_store", return_value=DummyStore()
+        ):
+            with patch.object(
+                pipeline, "rerankar", return_value=rerankar_return
+            ):
+                with patch.object(pipeline, "LLMPicker", picker_cls):
+                    return pipeline.relacionar_tickers(
+                        noticia,
+                        list(self.EMBS),
+                        config={"fase2": fase2},
+                        detalhes=detalhes,
+                    )
+
+    def test_a3_filtra_candidatos(self):
+        detalhes = {}
+        resultado = self._run(
+            {
+                "threshold_similaridade": 0.35,
+                "rerank": {"enabled": True, "threshold": 0.5},
+            },
+            detalhes=detalhes,
+            rerankar_return=["PETR4"],
+        )
+        self.assertEqual(resultado, ["PETR4"])
+        self.assertTrue(detalhes["rerank"]["aplicado"])
+
+    def test_a3_indisponivel_mantem_similaridade(self):
+        resultado = self._run(
+            {
+                "threshold_similaridade": 0.35,
+                "rerank": {"enabled": True, "threshold": 0.5},
+            },
+            rerankar_return=None,
+        )
+        self.assertEqual(set(resultado), {"PETR4", "BRKM5", "VALE3"})
+
+    def test_a3_preserva_ordem_do_cross_encoder(self):
+        resultado = self._run(
+            {
+                "threshold_similaridade": 0.35,
+                "rerank": {"enabled": True},
+            },
+            rerankar_return=["VALE3", "PETR4"],
+        )
+        self.assertEqual(resultado, ["VALE3", "PETR4"])
+
+    def test_a4_filtra_pelo_llm(self):
+        class FakePicker:
+            def __init__(self, cfg):
+                self.model = "fake"
+
+            def escolher(self, texto, candidatos):
+                return (["BRKM5"], "local")
+
+        detalhes = {}
+        resultado = self._run(
+            {"threshold_similaridade": 0.35, "llm": {"enabled": True}},
+            detalhes=detalhes,
+            picker=FakePicker(None),
+        )
+        self.assertEqual(resultado, ["BRKM5"])
+        self.assertEqual(detalhes["llm"]["provider"], "local")
+
+    def test_a4_fallback_mantem_similaridade(self):
+        class FakePicker:
+            def __init__(self, cfg):
+                self.model = "fake"
+
+            def escolher(self, texto, candidatos):
+                return (None, "fallback")
+
+        resultado = self._run(
+            {"threshold_similaridade": 0.35, "llm": {"enabled": True}},
+            picker=FakePicker(None),
+        )
+        self.assertEqual(set(resultado), {"PETR4", "BRKM5", "VALE3"})

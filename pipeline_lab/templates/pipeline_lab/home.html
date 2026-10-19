@@ -174,6 +174,63 @@
                             </div>
                         </div>
 
+                        <div class="row g-2 mt-1">
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="run-f2-rerank" name="fase2_rerank_enabled"
+                                           {% if param_defaults.fase2.rerank.enabled %}checked{% endif %}>
+                                    <label class="form-check-label small" for="run-f2-rerank">A3 · reranking com cross-encoder</label>
+                                </div>
+                            </div>
+                            <div class="col-8">
+                                <label class="form-label small mb-0" for="run-f2-rerank-model">A3 · modelo</label>
+                                <input type="text" class="form-control form-control-sm" id="run-f2-rerank-model"
+                                       name="fase2_rerank_modelo" value="{{ param_defaults.fase2.rerank.modelo }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small mb-0" for="run-f2-rerank-n">A3 · top-N</label>
+                                <input type="number" min="1" max="100" class="form-control form-control-sm" id="run-f2-rerank-n"
+                                       name="fase2_rerank_top_n" value="{{ param_defaults.fase2.rerank.top_n }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small mb-0" for="run-f2-rerank-thr">A3 · limiar</label>
+                                <input type="number" step="0.05" min="0" max="1" class="form-control form-control-sm" id="run-f2-rerank-thr"
+                                       name="fase2_rerank_threshold" value="{{ param_defaults.fase2.rerank.threshold }}">
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mt-1">
+                            <div class="col-12">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="run-f2-llm" name="fase2_llm_enabled"
+                                           {% if param_defaults.fase2.llm.enabled %}checked{% endif %}>
+                                    <label class="form-check-label small" for="run-f2-llm">A4 · LLM decide os tickers (local → nuvem)</label>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small mb-0" for="run-f2-llm-prov">A4 · provider</label>
+                                <select class="form-select form-select-sm" id="run-f2-llm-prov" name="fase2_llm_provider">
+                                    <option value="local" {% if param_defaults.fase2.llm.provider == "local" %}selected{% endif %}>local (OpenAI-compatível)</option>
+                                    <option value="openai" {% if param_defaults.fase2.llm.provider == "openai" %}selected{% endif %}>openai</option>
+                                </select>
+                            </div>
+                            <div class="col-8">
+                                <label class="form-label small mb-0" for="run-f2-llm-model">A4 · modelo</label>
+                                <input type="text" class="form-control form-control-sm" id="run-f2-llm-model"
+                                       name="fase2_llm_model" value="{{ param_defaults.fase2.llm.model }}">
+                            </div>
+                            <div class="col-8">
+                                <label class="form-label small mb-0" for="run-f2-llm-url">A4 · base_url (local)</label>
+                                <input type="text" class="form-control form-control-sm" id="run-f2-llm-url"
+                                       name="fase2_llm_base_url" value="{{ param_defaults.fase2.llm.base_url }}">
+                            </div>
+                            <div class="col-4">
+                                <label class="form-label small mb-0" for="run-f2-llm-n">A4 · top-N</label>
+                                <input type="number" min="1" max="100" class="form-control form-control-sm" id="run-f2-llm-n"
+                                       name="fase2_llm_top_n" value="{{ param_defaults.fase2.llm.top_n }}">
+                            </div>
+                        </div>
+
                         <div class="mt-2">
                             <label class="form-label small mb-0" for="run-f1-cent">F1 · centroides de referência (um por linha)</label>
                             <textarea class="form-control form-control-sm" id="run-f1-cent" name="fase1_centroides" rows="4">{% for c in param_defaults.fase1.centroides_referencia %}{{ c }}{% if not forloop.last %}

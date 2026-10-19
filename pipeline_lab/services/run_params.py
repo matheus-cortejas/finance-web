@@ -43,6 +43,17 @@ def _coerce_top_k(value) -> int | None:
     return ivalue if ivalue >= TOP_K_MIN else None
 
 
+def _checkbox(post, field: str) -> bool:
+    """Lê um checkbox do POST (ausente = desmarcado)."""
+    return str(post.get(field, "")).strip().lower() in {
+        "on",
+        "1",
+        "true",
+        "sim",
+        "yes",
+    }
+
+
 def _deep_merge(base: dict, extra: dict | None) -> dict:
     """Faz merge recursivo de ``extra`` em ``base`` (mutando ``base``)."""
     for key, value in (extra or {}).items():
@@ -58,6 +69,8 @@ def defaults() -> dict:
     cfg = load_global_config()
     fase1 = cfg.get("fase1", {}) or {}
     fase2 = cfg.get("fase2", {}) or {}
+    rerank = fase2.get("rerank", {}) or {}
+    llm2 = fase2.get("llm", {}) or {}
     fase3 = cfg.get("fase3", {}) or {}
     fase4 = cfg.get("fase4", {}) or {}
     pesos = fase3.get("pesos", {}) or {}
@@ -81,6 +94,19 @@ def defaults() -> dict:
             ),
             "top_k": _coerce_top_k(fase2.get("top_k")),
             "peso_lexical": float(fase2.get("peso_lexical", 0.0) or 0.0),
+            "rerank": {
+                "enabled": bool(rerank.get("enabled", False)),
+                "modelo": str(rerank.get("modelo", "") or ""),
+                "threshold": float(rerank.get("threshold", 0.5)),
+                "top_n": int(rerank.get("top_n", 20)),
+            },
+            "llm": {
+                "enabled": bool(llm2.get("enabled", False)),
+                "provider": str(llm2.get("provider", "local") or "local"),
+                "model": str(llm2.get("model", "") or ""),
+                "base_url": str(llm2.get("base_url", "") or ""),
+                "top_n": int(llm2.get("top_n", 20)),
+            },
         },
         "fase3": {
             "pesos": {chave: int(pesos.get(chave, 0)) for chave, _ in PESOS_FASE3}
@@ -221,6 +247,55 @@ def build_overrides(post) -> dict:
     if abs(peso_lexical - base["fase2"]["peso_lexical"]) > 1e-12:
         fase2["peso_lexical"] = peso_lexical
 
+    # A3 — reranking.
+    base_rerank = base["fase2"]["rerank"]
+    rerank: dict[str, Any] = {}
+    enabled = _checkbox(post, "fase2_rerank_enabled")
+    if enabled != base_rerank["enabled"]:
+        rerank["enabled"] = enabled
+    modelo = (post.get("fase2_rerank_modelo") or "").strip()
+    if modelo and modelo != base_rerank["modelo"]:
+        rerank["modelo"] = modelo
+    rerank_threshold = _parse_float(
+        post, "fase2_rerank_threshold", base_rerank["threshold"]
+    )
+    if abs(rerank_threshold - base_rerank["threshold"]) > 1e-12:
+        rerank["threshold"] = rerank_threshold
+    rerank_top_n = _parse_int(
+        post, "fase2_rerank_top_n", base_rerank["top_n"],
+        low=TOP_K_MIN, high=TOP_K_MAX,
+    )
+    if rerank_top_n != base_rerank["top_n"]:
+        rerank["top_n"] = rerank_top_n
+    if rerank:
+        fase2["rerank"] = rerank
+
+    # A4 — LLM.
+    base_llm = base["fase2"]["llm"]
+    llm2: dict[str, Any] = {}
+    llm_enabled = _checkbox(post, "fase2_llm_enabled")
+    if llm_enabled != base_llm["enabled"]:
+        llm2["enabled"] = llm_enabled
+    llm_provider = (
+        (post.get("fase2_llm_provider") or "").strip() or base_llm["provider"]
+    )
+    if llm_provider != base_llm["provider"]:
+        llm2["provider"] = llm_provider
+    llm_model = (post.get("fase2_llm_model") or "").strip()
+    if llm_model and llm_model != base_llm["model"]:
+        llm2["model"] = llm_model
+    llm_base_url = (post.get("fase2_llm_base_url") or "").strip()
+    if llm_base_url and llm_base_url != base_llm["base_url"]:
+        llm2["base_url"] = llm_base_url
+    llm_top_n = _parse_int(
+        post, "fase2_llm_top_n", base_llm["top_n"],
+        low=TOP_K_MIN, high=TOP_K_MAX,
+    )
+    if llm_top_n != base_llm["top_n"]:
+        llm2["top_n"] = llm_top_n
+    if llm2:
+        fase2["llm"] = llm2
+
     if fase2:
         overrides["fase2"] = fase2
 
@@ -332,6 +407,28 @@ def validate_overrides(overrides: dict | None) -> None:
     peso_lexical = float(fase2.get("peso_lexical", 0.0) or 0.0)
     if not (0.0 <= peso_lexical <= 1.0):
         raise ValidationError("Fase 2: peso_lexical deve estar entre 0 e 1.")
+
+    rerank = fase2.get("rerank", {}) or {}
+    if not (0.0 <= float(rerank.get("threshold", 0.5)) <= 1.0):
+        raise ValidationError("Fase 2: rerank.threshold deve estar entre 0 e 1.")
+    if not (TOP_K_MIN <= int(rerank.get("top_n", 20)) <= TOP_K_MAX):
+        raise ValidationError(
+            f"Fase 2: rerank.top_n deve estar entre {TOP_K_MIN} e {TOP_K_MAX}."
+        )
+
+    llm2 = fase2.get("llm", {}) or {}
+    if str(llm2.get("provider", "local")).strip().lower() not in {"local", "openai"}:
+        raise ValidationError(
+            "Fase 2: llm.provider deve ser 'local' ou 'openai'."
+        )
+    if not (TOP_K_MIN <= int(llm2.get("top_n", 20)) <= TOP_K_MAX):
+        raise ValidationError(
+            f"Fase 2: llm.top_n deve estar entre {TOP_K_MIN} e {TOP_K_MAX}."
+        )
+    if llm2.get("enabled") and not str(llm2.get("model", "") or "").strip():
+        raise ValidationError(
+            "Fase 2: informe o modelo quando o LLM da Fase 2 estiver ativo."
+        )
 
     if fase4["score_rejeicao_direta"] >= faixa["minimo"]:
         raise ValidationError(

@@ -1,4 +1,4 @@
-"""Estratégias da Fase 2 (associação notícia → ticker).
+r"""Estratégias da Fase 2 (associação notícia → ticker).
 
 O baseline do artigo (A0) associa por similaridade de cosseno contra *todos*
 os ativos, com um único limiar. Isso gera associações espúrias (ex.: notícia
@@ -46,6 +46,11 @@ def _texto(noticia: Dict[str, Any]) -> str:
         str(noticia.get(parte) or "")
         for parte in ("titulo", "descricao", "conteudo")
     )
+
+
+def texto_noticia(noticia: Dict[str, Any]) -> str:
+    """Texto consolidado da notícia (título + descrição + conteúdo)."""
+    return _texto(noticia)
 
 
 def setores_detectados(noticia: Dict[str, Any]) -> Set[str]:
@@ -129,6 +134,7 @@ __all__ = [
     "ESTRATEGIAS",
     "setores_detectados",
     "tickers_lexicais",
+    "texto_noticia",
     "filtrar_por_setor",
     "aplicar_estrategia",
     "setores_por_ticker",

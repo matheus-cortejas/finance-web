@@ -176,6 +176,20 @@ def compute_run_metrics(run: ExperimentRun) -> dict:
         )
         distribuicoes[field] = dict(counter.most_common())
 
+    fase2_uso: Counter = Counter()
+    for item in items:
+        det = item.fase2_detalhes or {}
+        if det.get("estrategia"):
+            fase2_uso[f"estrategia:{det['estrategia']}"] += 1
+        rerank = det.get("rerank") or {}
+        if rerank.get("enabled"):
+            fase2_uso[
+                "rerank:" + ("aplicado" if rerank.get("aplicado") else "indisponivel")
+            ] += 1
+        llm = det.get("llm") or {}
+        if llm.get("enabled"):
+            fase2_uso[f"llm:{llm.get('provider') or 'fallback'}"] += 1
+
     tempos = [
         float(item.tempos.get("total_s"))
         for item in items
@@ -209,4 +223,5 @@ def compute_run_metrics(run: ExperimentRun) -> dict:
         "relevancia_global": relevancia_sweep,
         "fase1_sweep": fase1_sweep,
         "distribuicoes": distribuicoes,
+        "fase2_uso": dict(fase2_uso.most_common()),
     }

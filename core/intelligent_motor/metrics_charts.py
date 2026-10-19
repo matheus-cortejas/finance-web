@@ -429,6 +429,18 @@ def gerar_resumo(
                 f"(top_k={fase2.get('top_k')}, "
                 f"peso_lexical={fase2.get('peso_lexical')})"
             )
+        rerank = fase2.get("rerank") or {}
+        if rerank.get("enabled"):
+            linhas.append(
+                f"  - Fase 2 A3 rerank: {rerank.get('modelo')} "
+                f"(top_n={rerank.get('top_n')}, θ={rerank.get('threshold')})"
+            )
+        llm2 = fase2.get("llm") or {}
+        if llm2.get("enabled"):
+            linhas.append(
+                f"  - Fase 2 A4 LLM: {llm2.get('provider')}/{llm2.get('model')} "
+                f"(top_n={llm2.get('top_n')})"
+            )
         linhas.append(
             f"  - Fase 4 cortes: rejeição ≤{rejeicao}, LLM {llm_min}–{llm_max}, "
             f"aprovação ≥{aprovacao}"

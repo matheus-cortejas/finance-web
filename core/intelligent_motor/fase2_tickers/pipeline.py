@@ -9,8 +9,12 @@ from .gating import (
     ESTRATEGIA_SIMILARIDADE,
     aplicar_estrategia,
     setores_por_ticker,
+    texto_noticia,
     tickers_lexicais,
 )
+from .llm_picker import LLMPicker
+from .rerank import DEFAULT_MODELO as RERANK_MODELO_PADRAO
+from .rerank import rerankar
 from .similarity import cosine_similarity
 from ..fase1_global_filter.logging import log_event
 
@@ -22,19 +26,25 @@ def relacionar_tickers(
     model_name: Optional[str] = None,
     device: Optional[str] = None,
     setores_ativos: Optional[Dict[str, str]] = None,
+    detalhes: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
-    """Relaciona tickers por similaridade de embedding.
+    """Relaciona tickers por similaridade de embedding, com defesas opcionais.
 
     Usa multiplicação matricial (numpy) quando possível; para 586 ativos e
     16k notícias isso é ordens de magnitude mais rápido que o loop Python.
 
-    A estratégia é lida de ``config['fase2']`` (ver ``gating.py``):
+    ``config['fase2']`` controla as estratégias (ver ``gating.py``):
 
     * ``estrategia`` (padrão ``similaridade``): ``similaridade`` (A0),
       ``similaridade_setor`` (A1) ou ``similaridade_setor_lexical`` (A2).
     * ``top_k`` (padrão ``None``): limita o número de tickers retornados.
     * ``peso_lexical`` (padrão ``0``): bônus de ordenação para tickers citados
       explicitamente no texto (usado em A2).
+    * ``rerank`` (A3): reordenar/filtrar os ``top_n`` candidatos com um
+      cross-encoder. Se ``enabled`` e o modelo falhar, mantém a similaridade.
+    * ``llm`` (A4): pedir ao LLM (local → escalonamento) os tickers afetados.
+
+    ``detalhes`` (opcional) é preenchido com o que foi aplicado, para métricas.
     """
     if not isinstance(carteira_usuario, (list, tuple)):
         raise ValueError("carteira_usuario deve ser uma lista de tickers")
@@ -46,10 +56,7 @@ def relacionar_tickers(
             "noticia deve conter 'embedding_noticia' gerado pela Fase 1"
         )
 
-    if config is None:
-        fase_cfg = {}
-    else:
-        fase_cfg = config.get("fase2", {})
+    fase_cfg = {} if config is None else (config.get("fase2", {}) or {})
 
     threshold = float(fase_cfg.get("threshold_similaridade", 0.70))
     estrategia = str(fase_cfg.get("estrategia", ESTRATEGIA_SIMILARIDADE))
@@ -166,6 +173,64 @@ def relacionar_tickers(
         + (peso_lexical if item[0] in lexicais else 0.0),
         reverse=True,
     )
+
+    # --- A3: reranking com cross-encoder no top-N do bi-encoder.
+    rerank_cfg = fase_cfg.get("rerank") or {}
+    if isinstance(rerank_cfg, dict) and rerank_cfg.get("enabled") and related:
+        top_n = int(rerank_cfg.get("top_n", 20))
+        entrada = [ticker for ticker, _ in related[:top_n]]
+        descricoes = store.get_descriptions(entrada)
+        aprovados = rerankar(
+            texto_noticia(noticia),
+            entrada,
+            descricoes,
+            model_name=str(rerank_cfg.get("modelo") or RERANK_MODELO_PADRAO),
+            threshold=float(rerank_cfg.get("threshold", 0.5)),
+            manter_minimo=int(rerank_cfg.get("manter_minimo", 1)),
+            device=device,
+        )
+        if detalhes is not None:
+            detalhes.setdefault("rerank", {})
+            detalhes["rerank"].update(
+                {
+                    "enabled": True,
+                    "aplicado": aprovados is not None,
+                    "modelo": str(rerank_cfg.get("modelo") or RERANK_MODELO_PADRAO),
+                    "n_entrada": len(entrada),
+                }
+            )
+        if aprovados is not None:
+            ordem = {ticker: i for i, ticker in enumerate(aprovados)}
+            related = [(t, s) for t, s in related if t in ordem]
+            related.sort(key=lambda item: ordem[item[0]])
+            if detalhes is not None:
+                detalhes["rerank"]["n_saida"] = len(related)
+
+    # --- A4: LLM (local → escalonamento) escolhe os tickers afetados.
+    llm_cfg = fase_cfg.get("llm") or {}
+    if isinstance(llm_cfg, dict) and llm_cfg.get("enabled") and related:
+        top_n = int(llm_cfg.get("top_n", 20))
+        entrada = [ticker for ticker, _ in related[:top_n]]
+        descricoes = store.get_descriptions(entrada)
+        picker = LLMPicker(llm_cfg)
+        escolhidos, provider = picker.escolher(
+            texto_noticia(noticia),
+            [(ticker, descricoes.get(ticker, ticker)) for ticker in entrada],
+        )
+        if detalhes is not None:
+            detalhes["llm"] = {
+                "enabled": True,
+                "aplicado": escolhidos is not None,
+                "provider": provider,
+                "model": picker.model,
+                "n_entrada": len(entrada),
+            }
+        if escolhidos is not None:
+            conjunto = set(escolhidos)
+            related = [(t, s) for t, s in related if t in conjunto]
+            if detalhes is not None:
+                detalhes["llm"]["n_saida"] = len(related)
+
     tickers = [ticker for ticker, _ in related]
 
     if top_k:
@@ -173,6 +238,11 @@ def relacionar_tickers(
             tickers = tickers[: int(top_k)]
         except (TypeError, ValueError):
             pass
+
+    if detalhes is not None:
+        detalhes["estrategia"] = estrategia
+        detalhes["n_candidatos"] = len(candidatos)
+        detalhes["n_tickers_final"] = len(tickers)
 
     elapsed_ms = (time.time() - start) * 1000.0
     if not tickers:

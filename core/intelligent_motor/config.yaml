@@ -27,6 +27,29 @@ fase2:
   # Bônus de ordenação para tickers citados explicitamente no texto (A2).
   peso_lexical: 0.0
 
+  # A3 — reranking dos top-N candidatos com um cross-encoder (lento, preciso).
+  rerank:
+    enabled: false
+    modelo: cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+    top_n: 20
+    threshold: 0.5
+    manter_minimo: 1
+
+  # A4 — LLM como primeiro nível: local (OpenAI-compatível) → nuvem.
+  llm:
+    enabled: false
+    provider: local
+    model: llama3.1:8b
+    base_url: http://localhost:11434/v1
+    timeout_seconds: 30
+    max_tokens: 300
+    temperature: 0.0
+    top_n: 20
+    # Usado quando o modelo local falha ou não responde (exige OPENAI_API_KEY).
+    escalar_para:
+      provider: openai
+      model: gpt-4o-mini
+
   cache:
     backend: sqlite
 

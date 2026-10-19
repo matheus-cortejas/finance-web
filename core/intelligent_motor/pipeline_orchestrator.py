@@ -141,16 +141,20 @@ def processar_noticia_completa(
 
     # ------------------------------------------------------------ Fase 2
     t0 = time.perf_counter()
+    fase2_detalhes: Dict[str, Any] = {}
     tickers = relacionar_tickers(
         noticia,
         carteira_usuario,
         config=config,
         model_name=effective_model,
         device=device,
+        detalhes=fase2_detalhes,
     )
     metrica["fase2_tempo_s"] = round(time.perf_counter() - t0, 4)
+    metrica["fase2_detalhes"] = fase2_detalhes
 
     noticia["tickers_relacionados"] = tickers
+    noticia["fase2_detalhes"] = fase2_detalhes
     metrica["n_tickers_relacionados"] = len(tickers)
 
     n_b3, n_sp500, n_outros = classificar_tickers_por_origem(tickers)

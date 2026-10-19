@@ -203,6 +203,44 @@ gerado fica em `exports/` e pode ser revisado e reaplicado com
 - Sem GPU: `EMBEDDING_DEVICE=cpu` e imagem Docker com PyTorch CPU.
 - Cache de Fase 1 e store de embeddings usam o mesmo namespace de modelo.
 
+### Variantes da Fase 2 (A0–A4)
+
+A associação notícia → ticker é configurável por execução (painel
+"Parâmetros avançados" ou `config.yaml`, em `fase2:`):
+
+| Variante | Configuração | O que faz |
+|----------|--------------|-----------|
+| **A0** | `estrategia: similaridade` | Baseline do artigo: cosseno contra todos os ativos. |
+| **A1** | `estrategia: similaridade_setor` | Restringe aos ativos do setor da notícia (curingas = sem setor). |
+| **A2** | `estrategia: similaridade_setor_lexical` | A1 + guarda lexical (tickers citados no texto via `peso_lexical`). |
+| **A3** | `rerank.enabled: true` | Reordena/filtra os `top_n` candidatos com um cross-encoder. |
+| **A4** | `llm.enabled: true` | Um LLM escolhe os tickers afetados, local → escalonamento. |
+
+A3 e A4 podem ser combinados com A0/A1/A2 (são pós-etapas). Sempre falham de
+forma segura: se o modelo não carregar (A3) ou o LLM não responder (A4), o
+resultado da similaridade é mantido e o fato fica registrado em
+`RunClassification.fase2_detalhes` (contagens por variante aparecem em
+`metricas["fase2_uso"]`).
+
+**A3 — cross-encoder.** O modelo padrão é
+`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (`rerank.modelo`, `threshold`,
+`top_n`, `manter_minimo`). Requer `sentence-transformers` (já instalado).
+
+**A4 — LLM local.** O provedor local é acessado por um endpoint
+**OpenAI-compatível**. Com [Ollama](https://ollama.com):
+
+```bash
+ollama pull llama3.1:8b
+ollama serve        # expõe http://localhost:11434/v1
+```
+
+No painel, marque "A4", escolha `provider: local` e ajuste `model`
+(`llama3.1:8b`) e `base_url` (`http://localhost:11434/v1`). Para escalar para a
+nuvem quando o local falhar, defina `OPENAI_API_KEY` e mantenha
+`fase2.llm.escalar_para` (`provider: openai`, `model: gpt-4o-mini`). Com
+`provider: openai`, o A4 usa direto a nuvem.
+
+
 Variáveis principais:
 
 | Variável | Padrão | Descrição |
