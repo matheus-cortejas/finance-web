@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
+import unittest
 import zipfile
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -197,3 +199,193 @@ class ModelsPageTests(TestCase):
         response = self.client.get(reverse("pipeline_lab_home"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="device"')
+
+
+class RunParamsTests(TestCase):
+    def test_defaults_refletem_config(self):
+        from pipeline_lab.services import run_params
+
+        padroes = run_params.defaults()
+        self.assertIn("threshold_relevancia", padroes["fase1"])
+        self.assertIn("threshold_similaridade", padroes["fase2"])
+        self.assertEqual(len(padroes["fase3"]["pesos"]), len(run_params.PESOS_FASE3))
+        self.assertIn("score_aprovacao_direta", padroes["fase4"])
+
+    def test_effective_faz_merge_sem_mutar_defaults(self):
+        from pipeline_lab.services.run_params import defaults, effective
+
+        base_rel = defaults()["fase1"]["threshold_relevancia"]
+        eff = effective({"fase1": {"threshold_relevancia": base_rel + 0.1}})
+        self.assertAlmostEqual(eff["fase1"]["threshold_relevancia"], base_rel + 0.1)
+        # O default global precisa continuar intacto.
+        self.assertAlmostEqual(defaults()["fase1"]["threshold_relevancia"], base_rel)
+
+    def test_build_overrides_vazio_sem_diferencas(self):
+        from pipeline_lab.services.run_params import build_overrides
+
+        self.assertEqual(build_overrides({}), {})
+
+    def test_build_overrides_le_valores_do_formulario(self):
+        from pipeline_lab.services.run_params import build_overrides
+
+        overrides = build_overrides(
+            {
+                "fase1_threshold": "0,55",
+                "fase3_ticker_explicito": "9",
+                "fase4_aprovacao": "8",
+            }
+        )
+        self.assertAlmostEqual(overrides["fase1"]["threshold_relevancia"], 0.55)
+        self.assertEqual(overrides["fase3"]["pesos"]["ticker_explicito"], 9)
+        self.assertEqual(overrides["fase4"]["score_aprovacao_direta"], 8)
+
+    def test_build_overrides_com_centroides(self):
+        from pipeline_lab.services.run_params import build_overrides
+
+        overrides = build_overrides({"fase1_centroides": "um\n  dois  \n"})
+        self.assertEqual(
+            overrides["fase1"]["centroides_referencia"], ["um", "dois"]
+        )
+
+    def test_validate_rejeita_cortes_incoerentes(self):
+        from pipeline_lab.services.run_params import validate_overrides
+
+        with self.assertRaises(ValidationError):
+            validate_overrides(
+                {
+                    "fase4": {
+                        "score_rejeicao_direta": 5,
+                        "faixa_llm": {"minimo": 3},
+                    }
+                }
+            )
+
+    def test_validate_rejeita_threshold_fora_da_faixa(self):
+        from pipeline_lab.services.run_params import validate_overrides
+
+        with self.assertRaises(ValidationError):
+            validate_overrides({"fase1": {"threshold_relevancia": 1.5}})
+
+
+class CreateRunOverridesTests(TestCase):
+    def test_create_run_persiste_overrides_e_efetivo(self):
+        from pipeline_lab.services.experiments import create_run
+
+        run = create_run(
+            modelo="modelo-teste",
+            overrides={"fase1": {"threshold_relevancia": 0.55}},
+        )
+        self.assertEqual(
+            run.config["overrides"], {"fase1": {"threshold_relevancia": 0.55}}
+        )
+        self.assertAlmostEqual(
+            run.config["efetivo"]["fase1"]["threshold_relevancia"], 0.55
+        )
+        # Sem override explícito, o valor do config.yaml permanece.
+        from pipeline_lab.services.run_params import defaults
+
+        self.assertAlmostEqual(
+            run.config["efetivo"]["fase2"]["threshold_similaridade"],
+            defaults()["fase2"]["threshold_similaridade"],
+        )
+
+    def test_create_run_rejeita_overrides_invalidos(self):
+        from pipeline_lab.services.experiments import create_run
+
+        with self.assertRaises(ValidationError):
+            create_run(
+                modelo="modelo-teste",
+                overrides={"fase1": {"threshold_relevancia": 2.0}},
+            )
+
+
+class RunDetailParamsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            "staff3", password="senha-teste", is_staff=True
+        )
+        self.client = Client()
+        self.client.force_login(self.user)
+        self.run = ExperimentRun.objects.create(
+            modelo="modelo-teste",
+            config={
+                "efetivo": {
+                    "fase1": {"threshold_relevancia": 0.55},
+                    "fase2": {"threshold_similaridade": 0.35},
+                },
+                "overrides": {"fase1": {"threshold_relevancia": 0.55}},
+            },
+        )
+
+    def test_run_detail_mostra_parametros_e_graficos(self):
+        response = self.client.get(
+            reverse("pipeline_lab_run_detail", args=[self.run.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Parâmetros efetivos")
+        self.assertContains(response, "Gráficos do artigo")
+
+    def test_home_mostra_painel_avancado(self):
+        response = self.client.get(reverse("pipeline_lab_home"))
+        self.assertContains(response, "Parâmetros avançados")
+        self.assertContains(response, 'name="fase3_ticker_explicito"')
+
+
+_HAS_CHARTS = bool(importlib.util.find_spec("pandas")) and bool(
+    importlib.util.find_spec("matplotlib")
+)
+
+
+@unittest.skipUnless(_HAS_CHARTS, "pandas/matplotlib ausentes")
+class GenerateRunChartsTests(TestCase):
+    def test_gera_artefatos_so_da_execucao(self):
+        run = ExperimentRun.objects.create(
+            modelo="modelo-teste",
+            status=ExperimentRun.STATUS_DONE,
+            total_noticias=2,
+        )
+        base = {
+            "n_tickers_b3": 1,
+            "n_tickers_sp500": 0,
+            "n_tickers_outros": 0,
+            "sentimento": "positivo",
+            "impacto": "alto",
+            "categoria": "resultados",
+            "fase1_tempo_s": 0.1,
+            "fase2_tempo_s": 0.1,
+            "fase3_tempo_s": 0.1,
+            "fase4_tempo_s": 0.1,
+            "fase5_tempo_s": 0.1,
+            "t_total_s": 0.5,
+        }
+        linhas = [
+            dict(base, run_id=run.id, noticia_id=1, fase1_aprovada=True,
+                 relevancia_global=0.9, score_heuristico=5,
+                 provider_fase4="openai", relevancia_binaria=1),
+            dict(base, run_id=run.id, noticia_id=2, fase1_aprovada=False,
+                 relevancia_global=0.1, score_heuristico=None,
+                 provider_fase4=None, relevancia_binaria=0),
+            dict(base, run_id=999, noticia_id=3, fase1_aprovada=True,
+                 relevancia_global=0.9, score_heuristico=5,
+                 provider_fase4="bypass", relevancia_binaria=1),
+        ]
+        with TemporaryDirectory() as tmp:
+            metrics_path = Path(tmp) / "metrics.jsonl"
+            metrics_path.write_text(
+                "\n".join(json.dumps(linha) for linha in linhas),
+                encoding="utf-8",
+            )
+            output = Path(tmp) / "out"
+            call_command(
+                "generate_run_charts",
+                run_id=run.id,
+                metrics_path=str(metrics_path),
+                output=str(output),
+                verbosity=0,
+            )
+            self.assertTrue((output / "metricas.csv").exists())
+            self.assertTrue((output / "resumo.txt").exists())
+            self.assertTrue((output / "fig_score_heuristico.png").exists())
+            # A linha do run 999 não pode entrar nas métricas desta execução.
+            conteudo = (output / "metricas.csv").read_text(encoding="utf-8")
+            self.assertNotIn("999", conteudo)

@@ -63,7 +63,15 @@ def avaliar_relevancia_global(
     model_key = generator.model_key
 
     chave = f"emb:{model_key}:{_sha256(preproc_text)}"
-    ref_key = f"ref:financeiro_mult:{model_key}"
+
+    # Os centroides entram na chave do cache: assim trocar os centroides de
+    # referência (por execução) invalida o cache em vez de reutilizar os
+    # embeddings antigos.
+    centroides = config.get("centroides_referencia", [])
+    if not centroides:
+        centroides = ["Análise financeira e mercado econômico"]
+    centroides_key = _sha256("\n".join(centroides))[:16]
+    ref_key = f"ref:financeiro_mult:{model_key}:{centroides_key}"
 
     cache = get_cache_manager() if cache_enabled else None
 
@@ -95,9 +103,6 @@ def avaliar_relevancia_global(
             emb_refs = None
 
     if emb_refs is None:
-        centroides = config.get("centroides_referencia", [])
-        if not centroides:
-            centroides = ["Análise financeira e mercado econômico"]
         try:
             emb_refs = generator.gerar_lote(centroides)
         except Exception as exc:

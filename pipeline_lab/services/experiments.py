@@ -62,12 +62,18 @@ def create_run(
     usar_llm: bool = False,
     cache_enabled: bool | None = None,
     device: str | None = None,
+    overrides: dict | None = None,
 ) -> ExperimentRun:
     modelo = (modelo or "").strip()
     if not modelo:
         raise ValueError("Modelo de embeddings é obrigatório.")
     if len(modelo) > 255:
         raise ValueError("Nome do modelo muito longo (máximo 255).")
+
+    from pipeline_lab.services.run_params import effective, validate_overrides
+
+    overrides = overrides or {}
+    validate_overrides(overrides)
 
     config = {
         "limite": int(limite) if limite else None,
@@ -83,6 +89,8 @@ def create_run(
         ),
         "device": (device or "").strip()
         or getattr(settings, "EMBEDDING_DEVICE", "cpu"),
+        "overrides": overrides,
+        "efetivo": effective(overrides),
     }
 
     qs = build_noticias_queryset(config)
@@ -168,6 +176,7 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
     device = (config.get("device") or "").strip() or getattr(
         settings, "EMBEDDING_DEVICE", "cpu"
     )
+    overrides = config.get("overrides") or {}
 
     base_qs = build_noticias_queryset(config, apply_limit=False)
     already_ids = list(
@@ -312,6 +321,7 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
                 usar_llm=usar_llm,
                 cache_enabled=cache_enabled,
                 device=device,
+                overrides=overrides,
             )
             elapsed = (django_timezone.now() - started).total_seconds()
             defaults = _classification_defaults(result or {}, elapsed)
@@ -376,6 +386,15 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
         run.processadas,
         run.erros,
     )
+
+    # Gera os gráficos do artigo automaticamente (best-effort: uma falha aqui
+    # não invalida a execução).
+    try:
+        from django.core.management import call_command
+
+        call_command("generate_run_charts", run_id=run.id, verbosity=0)
+    except Exception:
+        logger.exception("Run %s: falha ao gerar gráficos", run.id)
 
 
 def _classification_defaults(result: dict, elapsed: float) -> dict:

@@ -19,6 +19,15 @@ from .pipeline_metrics import registrar_metrica, classificar_tickers_por_origem
 _init_lock = threading.Lock()
 
 
+def _deep_merge_config(base: Dict[str, Any], extra: Dict[str, Any]) -> None:
+    """Aplica overrides de configuração recursivamente, sem mutar ``extra``."""
+    for key, value in (extra or {}).items():
+        if isinstance(value, dict) and isinstance(base.get(key), dict):
+            _deep_merge_config(base[key], value)
+        else:
+            base[key] = copy.deepcopy(value)
+
+
 def _ensure_initialized(
     config: Dict[str, Any],
     model_name: Optional[str],
@@ -52,6 +61,7 @@ def processar_noticia_completa(
     usar_llm: bool = True,
     cache_enabled: Optional[bool] = None,
     device: Optional[str] = None,
+    overrides: Optional[Dict[str, Any]] = None,
 ) -> dict:
     """Executa o pipeline com modelo e ponto de parada configuráveis.
 
@@ -64,6 +74,8 @@ def processar_noticia_completa(
         usar_llm: se False, Fases 4/5 usam apenas regras/fallback
         cache_enabled: sobrescreve a configuração de cache (experimentos)
         device: 'cpu', 'cuda', 'auto' ou None (usa o default das settings)
+        overrides: limiares/pesos por execução (Fases 1–4), mesclados
+            sobre a configuração global
     """
     stop_after = max(1, min(int(stop_after), 5))
     config = copy.deepcopy(load_global_config())
@@ -79,6 +91,11 @@ def processar_noticia_completa(
         config.setdefault("fase5", {}).setdefault("cache", {})["enabled"] = bool(
             cache_enabled
         )
+
+    # Overrides da execução (limiares e pesos) vêm por último para vencer
+    # os valores do config.yaml.
+    if overrides:
+        _deep_merge_config(config, overrides)
 
     effective_cache = bool(
         config.get("fase1", {}).get("cache", {}).get("enabled", True)

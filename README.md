@@ -103,6 +103,7 @@ GPU habilitada). O build baixa vários GB.
 | `sync_feeds` | Sincroniza `FonteRSS` a partir de `rss.txt`. |
 | `run_experiments` | Worker de execuções. `--once`, `--run-id`, `--poll-seconds`. |
 | `compute_metrics` | Recalcula métricas de uma execução. `--run-id N` ou `--all`. |
+| `generate_run_charts` | Gera gráficos/artefatos da execução em `exports/lab/run-<id>/`. `--run-id N`. |
 | `import_labels` | Importa labels anotados (CSV) para `NewsLabel`. |
 | `export_dataset` | Exporta JSONL + `manifest.json` + `annotation_sample.csv`. |
 | `migrate_sqlite_to_postgres` | Migra o corpus do SQLite para o PostgreSQL preservando IDs. |
@@ -121,6 +122,21 @@ Exemplos:
 
 - Cria uma `ExperimentRun` escolhendo modelo de embeddings, limite, janela de
   datas, `stop_after` (1–5), device (`auto`/`cpu`/`cuda`) e se usa LLM.
+- **Parâmetros por execução** (painel "Parâmetros avançados"): limiar de
+  relevância da Fase 1 e seus centroides, limiar de similaridade da Fase 2, os
+  11 pesos da Fase 3 e os cortes da Fase 4 (rejeição, faixa do LLM, aprovação e
+  fallback). Só o que difere do `config.yaml` é gravado em
+  `ExperimentRun.config["overrides"]`, com o resultado final em
+  `config["efetivo"]`. A Fase 6 fica fora (o pipeline para na Fase 5).
+- Os parâmetros efetivos aparecem na página da execução e a comparação mostra
+  `θ rel. / θ sim.` por execução.
+- **Gráficos do artigo**: ao terminar cada execução o worker gera
+  automaticamente os artefatos em `exports/lab/run-<id>/` (bind mount, visível
+  no host): os 4 gráficos do artigo (score heurístico, funil de decisão,
+  tickers por origem, tempo por fase) e extras (varredura de limiar, matrizes de
+  confusão, distribuições e comparativo entre execuções), além de `resumo.txt`,
+  `metricas.csv` e `amostra_fase4.csv`. Há um botão "Regenerar gráficos" na
+  página da execução e o comando `generate_run_charts --run-id N`.
 - Fases 4 e 5 podem rodar com fallback heurístico quando `usar_llm=0`
   (não exige `OPENAI_API_KEY`).
 - O worker processa as execuções pendentes, retoma execuções interrompidas e
@@ -158,6 +174,7 @@ Variáveis principais:
 | `EXPERIMENT_CACHE_ENABLED` | `0` | Habilita cache da Fase 1. |
 | `OPENAI_API_KEY` | — | Opcional; sem ela, Fases 4/5 usam fallback. |
 | `PIPELINE_METRICS_PATH` | `pipeline_metrics.jsonl` | JSONL de métricas do pipeline. |
+| `LAB_CHARTS_DIR` | `exports/lab` | Pasta dos gráficos/artefatos por execução. |
 
 ## Dataset exportado
 

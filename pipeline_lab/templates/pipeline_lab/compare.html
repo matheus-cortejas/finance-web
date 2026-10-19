@@ -20,6 +20,7 @@
                         <tr>
                             <th>#</th>
                             <th>Modelo</th>
+                            <th>θ rel. / θ sim.</th>
                             <th>Status</th>
                             <th>Labels</th>
                             <th>Fase 1 F1</th>
@@ -40,6 +41,9 @@
                                     {% if row.run.embedding_dim %}
                                         <div class="small text-muted">{{ row.run.embedding_dim }} dims</div>
                                     {% endif %}
+                                </td>
+                                <td class="small">
+                                    {{ row.theta_rel|default:"—" }} / {{ row.theta_sim|default:"—" }}
                                 </td>
                                 <td>
                                     {% if row.run.status == 'done' %}

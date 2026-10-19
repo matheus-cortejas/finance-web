@@ -7,6 +7,12 @@ urlpatterns = [
     path("runs/create/", views.create_run_view, name="pipeline_lab_create_run"),
     path("runs/<int:run_id>/", views.run_detail, name="pipeline_lab_run_detail"),
     path("runs/<int:run_id>/cancel/", views.cancel_run, name="pipeline_lab_cancel_run"),
+    path("runs/<int:run_id>/graficos/", views.run_charts, name="pipeline_lab_run_charts"),
+    path(
+        "runs/<int:run_id>/graficos/<str:filename>/",
+        views.run_chart_file,
+        name="pipeline_lab_run_chart_file",
+    ),
     path("compare/", views.compare_runs, name="pipeline_lab_compare"),
     path("models/", views.models_view, name="pipeline_lab_models"),
     path("models/<int:model_id>/testar/", views.model_test, name="pipeline_lab_model_test"),

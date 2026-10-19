@@ -4,11 +4,13 @@ import json
 import logging
 import time
 from datetime import datetime
+from pathlib import Path
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.core.exceptions import ValidationError
+from django.http import FileResponse, Http404, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
@@ -16,6 +18,11 @@ from django.views.decorators.http import require_POST
 from core.models import Ativo, Noticia
 from pipeline_lab.models import AssetEmbedding, ExperimentRun, LabModel, NewsLabel
 from pipeline_lab.services.experiments import create_run
+from pipeline_lab.services.run_params import (
+    PESOS_FASE3,
+    build_overrides,
+    defaults as param_defaults,
+)
 from pipeline_lab.services.model_registry import (
     clear_asset_embeddings,
     delete_local_model,
@@ -35,6 +42,32 @@ def _is_staff(user):
 
 def _device_choices() -> list[str]:
     return ["auto", "cpu", "cuda"]
+
+
+def _charts_dir(run_id: int) -> Path:
+    base = Path(
+        getattr(settings, "LAB_CHARTS_DIR", Path(settings.BASE_DIR) / "exports" / "lab")
+    )
+    return base / f"run-{run_id}"
+
+
+def _chart_files(run_id: int) -> list[dict]:
+    """Lista os artefatos já gerados para uma execução (na ordem do manifesto)."""
+    from core.intelligent_motor.chart_manifest import FILE_LABELS
+
+    run_dir = _charts_dir(run_id)
+    arquivos = []
+    for nome, rotulo in FILE_LABELS.items():
+        caminho = run_dir / nome
+        if caminho.is_file():
+            arquivos.append(
+                {
+                    "name": nome,
+                    "label": rotulo,
+                    "is_image": nome.endswith(".png"),
+                }
+            )
+    return arquivos
 
 
 def _model_choices() -> list[str]:
@@ -156,6 +189,7 @@ def _simular_alertas(pipeline_result: dict) -> dict:
 @login_required
 @user_passes_test(_is_staff)
 def pipeline_lab_home(request):
+    padroes = param_defaults()
     context = {
         "model_choices": _model_choices() or [
             "paraphrase-multilingual-MiniLM-L12-v2"
@@ -170,6 +204,15 @@ def pipeline_lab_home(request):
         "total_labels": NewsLabel.objects.exclude(relevancia=None).count(),
         "total_runs": ExperimentRun.objects.count(),
         "total_modelos": LabModel.objects.count(),
+        "param_defaults": padroes,
+        "param_pesos": [
+            {
+                "key": chave,
+                "label": rotulo,
+                "default": padroes["fase3"]["pesos"][chave],
+            }
+            for chave, rotulo in PESOS_FASE3
+        ],
     }
 
     if request.method == "POST":
@@ -248,6 +291,7 @@ def create_run_view(request):
         if limite is not None and limite <= 0:
             raise ValueError("O limite deve ser um inteiro maior que zero.")
         stop_after = max(1, min(int(request.POST.get("stop_after", 3)), 5))
+        overrides = build_overrides(request.POST)
         run = create_run(
             modelo=request.POST.get("modelo", ""),
             nome=request.POST.get("nome", ""),
@@ -260,7 +304,11 @@ def create_run_view(request):
             usar_llm=request.POST.get("usar_llm") == "on",
             cache_enabled=request.POST.get("cache_enabled") == "on",
             device=request.POST.get("device") or None,
+            overrides=overrides,
         )
+    except ValidationError as exc:
+        messages.error(request, " ".join(exc.messages))
+        return redirect("pipeline_lab_home")
     except (ValueError, TypeError) as exc:
         messages.error(request, str(exc))
         return redirect("pipeline_lab_home")
@@ -281,6 +329,7 @@ def run_detail(request, run_id: int):
         run.classifications.select_related("noticia")
         .order_by("noticia_id")[:200]
     )
+    config = run.config or {}
     return render(
         request,
         "pipeline_lab/run_detail.html",
@@ -288,9 +337,12 @@ def run_detail(request, run_id: int):
             "run": run,
             "classifications": classifications,
             "total_classifications": run.classifications.count(),
-            "config": run.config or {},
+            "config": config,
             "metricas": run.metricas or {},
             "model_choices": _model_choices(),
+            "parametros": config.get("efetivo") or param_defaults(),
+            "overrides": config.get("overrides") or {},
+            "chart_files": _chart_files(run.id),
         },
     )
 
@@ -315,6 +367,48 @@ def cancel_run(request, run_id: int):
 
 @login_required
 @user_passes_test(_is_staff)
+@require_POST
+def run_charts(request, run_id: int):
+    """Regenera os gráficos/artefatos da execução a pedido do usuário."""
+    run = get_object_or_404(ExperimentRun, pk=run_id)
+    try:
+        from django.core.management import call_command
+
+        call_command("generate_run_charts", run_id=run.id, verbosity=0)
+        messages.success(request, "Gráficos regenerados.")
+    except Exception as exc:
+        logger.exception("Falha ao gerar gráficos da execução %s", run.id)
+        messages.error(request, f"Falha ao gerar gráficos: {exc}")
+    return redirect("pipeline_lab_run_detail", run_id=run.id)
+
+
+@login_required
+@user_passes_test(_is_staff)
+def run_chart_file(request, run_id: int, filename: str):
+    """Serve um artefato gerado, com whitelist de nomes e da pasta da execução."""
+    from core.intelligent_motor.chart_manifest import FILE_LABELS
+
+    if filename not in FILE_LABELS:
+        raise Http404("Arquivo não permitido.")
+
+    run_dir = _charts_dir(run_id).resolve()
+    caminho = (run_dir / filename).resolve()
+    # Garante que o arquivo está mesmo dentro da pasta da execução.
+    if run_dir not in caminho.parents or not caminho.is_file():
+        raise Http404("Arquivo não encontrado.")
+
+    if filename.endswith(".png"):
+        return FileResponse(caminho.open("rb"), content_type="image/png")
+    if filename.endswith(".csv"):
+        return FileResponse(
+            caminho.open("rb"), content_type="text/csv", as_attachment=False
+        )
+    conteudo = caminho.read_text(encoding="utf-8")
+    return HttpResponse(conteudo, content_type="text/plain; charset=utf-8")
+
+
+@login_required
+@user_passes_test(_is_staff)
 def compare_runs(request):
     rows = []
     for run in ExperimentRun.objects.order_by("-criado_em")[:100]:
@@ -323,9 +417,14 @@ def compare_runs(request):
         best_global = (metrics.get("relevancia_global") or {}).get("best") or {}
         fase1_metrics = (metrics.get("fase1") or {}).get("metricas", {})
         fase4_metrics = (metrics.get("fase4") or {}).get("metricas", {})
+        efetivo = (run.config or {}).get("efetivo") or {}
         rows.append(
             {
                 "run": run,
+                "theta_rel": (efetivo.get("fase1") or {}).get("threshold_relevancia"),
+                "theta_sim": (efetivo.get("fase2") or {}).get(
+                    "threshold_similaridade"
+                ),
                 "labeled": metrics.get("labeled_total"),
                 "fase1_f1": (
                     fase1_metrics.get("f1")
