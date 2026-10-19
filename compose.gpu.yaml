@@ -1,0 +1,38 @@
+# Perfil opcional para rodar `web` e `worker` em GPU NVIDIA.
+#
+# Pré-requisitos no host:
+#   - driver NVIDIA instalado
+#   - nvidia-container-toolkit configurado no Docker
+#     (no Docker Desktop/WSL2, habilite a integração com a GPU)
+#
+# Uso:
+#   docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+#
+# Observações:
+#   - A imagem `finance-web:gpu` é construída com PyTorch CUDA (índice cu124),
+#     então o build baixa vários GB. A imagem CPU (`finance-web:local`)
+#     continua sendo o padrão.
+#   - `db`, `migrate`, `collector`, `bootstrap` e `exporter` continuam em CPU:
+#     a coleta não usa GPU.
+#   - Este perfil ainda não foi validado em máquina com GPU.
+
+services:
+  web:
+    image: finance-web:gpu
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu124
+    gpus: all
+    environment:
+      EMBEDDING_DEVICE: cuda
+
+  worker:
+    image: finance-web:gpu
+    build:
+      context: .
+      args:
+        TORCH_INDEX_URL: https://download.pytorch.org/whl/cu124
+    gpus: all
+    environment:
+      EMBEDDING_DEVICE: cuda

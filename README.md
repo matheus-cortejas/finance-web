@@ -77,6 +77,22 @@ criar um diretório vazio no host). O comando também falha de propósito se o
 destino já tiver notícias; use `--force` (via `command` do serviço) apenas
 quando quiser sobrescrever.
 
+### Perfil com GPU (opcional, ainda não validado)
+
+`web` e `worker` podem rodar em GPU NVIDIA; `db`, `migrate`, `collector`,
+`bootstrap` e `exporter` continuam em CPU.
+
+```bash
+docker compose -f compose.yaml -f compose.gpu.yaml up -d --build
+```
+
+O overlay `compose.gpu.yaml` reconstrói a imagem como `finance-web:gpu`
+usando PyTorch CUDA (`cu124`) e define `EMBEDDING_DEVICE=cuda`. Pré-requisitos
+no host: driver NVIDIA + `nvidia-container-toolkit` (no WSL2, integração de
+GPU habilitada). O build baixa vários GB.
+
+> Este perfil foi apenas preparado; falta validar numa máquina com GPU.
+
 ## Comandos de gerenciamento
 
 | Comando | Descrição |
@@ -165,6 +181,7 @@ finance-web/
 ├── static/
 ├── legacy/                         # software antigo preservado (não usado)
 ├── compose.yaml
+├── compose.gpu.yaml
 ├── Dockerfile
 ├── rss.txt                         # fontes RSS
 ├── core_ativos.json                # base de ativos
