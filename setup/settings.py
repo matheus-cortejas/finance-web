@@ -130,6 +130,10 @@ EXPERIMENT_CACHE_ENABLED = _env_bool("EXPERIMENT_CACHE_ENABLED", False)
 EXPERIMENT_METRICS_PATH = Path(
     os.getenv("PIPELINE_METRICS_PATH", PROJECT_ROOT / "pipeline_metrics.jsonl")
 )
+# Pasta dos gráficos/artefatos gerados por execução no laboratório.
+LAB_CHARTS_DIR = Path(
+    os.getenv("LAB_CHARTS_DIR", str(PROJECT_ROOT / "exports" / "lab"))
+)
 
 DATABASES = {
     "default": {

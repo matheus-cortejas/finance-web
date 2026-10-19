@@ -34,3 +34,7 @@ urllib3==2.6.3
 whitenoise>=6.8,<7
 pyyaml
 sentence-transformers
+
+# Gráficos do artigo (gerados por execução no laboratório).
+matplotlib>=3.8,<4
+pandas>=2.2,<3
