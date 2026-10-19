@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 
-from setup.logger import configure_logging
 from setup.settings import (
     DEFAULT_B3_CSV,
     DEFAULT_RSS_PATH,
@@ -46,9 +45,8 @@ def _find_assets_by_term(term: str) -> list[dict]:
 
 def run_monitor_workflow(b3_csv: str | os.PathLike[str] | None = None, rss_path: str | os.PathLike[str] | None = None, interactive: bool = True) -> None:
     from core.models import Ativo
-    from core.scheduler.jobs import collect_initial_news
+    from legacy.scheduler.jobs import collect_initial_news
 
-    configure_logging()
     logger.info("Inicializando monitor de notícias")
 
     # Tenta carregar a partir do JSON primeiro
@@ -90,9 +88,8 @@ def run_monitor_workflow(b3_csv: str | os.PathLike[str] | None = None, rss_path:
 
 
 def run_scheduler_workflow(rss_path: str | os.PathLike[str] | None = None) -> None:
-    from core.scheduler.app import run_scheduler
+    from legacy.scheduler.app import run_scheduler
 
-    configure_logging()
     feeds = load_feeds(rss_path or DEFAULT_RSS_PATH)
     if not feeds:
         logger.warning("Nenhum feed RSS encontrado; saindo")

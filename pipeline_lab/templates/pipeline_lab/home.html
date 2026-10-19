@@ -4,331 +4,340 @@
 
 {% block body %}
 <div class="fade-in">
-    <div class="mb-4">
-        <span class="soft-badge">Ferramenta de teste</span>
-        <h1 class="h2 fw-bold hero-title mb-0 mt-2">Pipeline Lab</h1>
-        <p class="hero-subtitle mb-0">Teste manual do motor inteligente fase a fase. Nenhum dado é persistido no banco.</p>
+    <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+        <div>
+            <span class="soft-badge">Laboratório do TCC</span>
+            <h1 class="h2 fw-bold hero-title mb-0 mt-2">Pipeline Lab</h1>
+            <p class="hero-subtitle mb-0">
+                Compare modelos de embeddings sobre o corpus coletado. A coleta
+                roda separada, sem carregar modelo.
+            </p>
+        </div>
+        <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="{% url 'pipeline_lab_compare' %}">
+                Comparar execuções
+            </a>
+        </div>
     </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}" role="alert">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
 
     {% if error %}
         <div class="alert alert-danger" role="alert">{{ error }}</div>
     {% endif %}
 
-    <!-- Formulário de entrada -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="glass surface p-3 h-100">
+                <div class="text-muted small">Notícias no banco</div>
+                <div class="h3 fw-bold mb-0">{{ total_noticias }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="glass surface p-3 h-100">
+                <div class="text-muted small">Com conteúdo</div>
+                <div class="h3 fw-bold mb-0">{{ noticias_com_conteudo }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="glass surface p-3 h-100">
+                <div class="text-muted small">Labels de relevância</div>
+                <div class="h3 fw-bold mb-0">{{ total_labels }}</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="glass surface p-3 h-100">
+                <div class="text-muted small">Execuções</div>
+                <div class="h3 fw-bold mb-0">{{ total_runs }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-4">
+        <div class="col-lg-5">
+            <div class="glass surface p-4 h-100">
+                <h2 class="h5 fw-bold mb-3">Nova execução</h2>
+                <form method="post" action="{% url 'pipeline_lab_create_run' %}">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="run-modelo">Modelo de embeddings *</label>
+                        <input class="form-control" id="run-modelo" name="modelo" list="model-options"
+                               placeholder="ex.: BAAI/bge-m3 ou caminho local" required>
+                        <datalist id="model-options">
+                            {% for m in model_choices %}<option value="{{ m }}"></option>{% endfor %}
+                        </datalist>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="run-nome">Nome (opcional)</label>
+                        <input class="form-control" id="run-nome" name="nome" maxlength="255">
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-medium" for="run-limite">Limite de notícias</label>
+                            <input type="number" min="1" class="form-control" id="run-limite" name="limite"
+                                   placeholder="todas">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-medium" for="run-stop">Parar após</label>
+                            <select class="form-select" id="run-stop" name="stop_after">
+                                <option value="1">Fase 1 (relevância global)</option>
+                                <option value="2">Fase 2 (tickers)</option>
+                                <option value="3" selected>Fase 3 (heurística)</option>
+                                <option value="4">Fase 4 (gate)</option>
+                                <option value="5">Fase 5 (classificação rica)</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-medium" for="run-since">Publicado desde</label>
+                            <input type="date" class="form-control" id="run-since" name="since">
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-medium" for="run-until">Publicado até</label>
+                            <input type="date" class="form-control" id="run-until" name="until">
+                        </div>
+                    </div>
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="run-content" name="only_with_content">
+                        <label class="form-check-label small" for="run-content">Somente notícias com conteúdo</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="run-llm" name="usar_llm">
+                        <label class="form-check-label small" for="run-llm">Usar LLM nas Fases 4/5</label>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="run-cache" name="cache_enabled">
+                        <label class="form-check-label small" for="run-cache">Reutilizar cache de embeddings</label>
+                    </div>
+                    <button class="btn btn-primary w-100" type="submit">Criar execução</button>
+                    <p class="text-muted small mb-0 mt-2">
+                        A execução é processada pelo serviço <code>worker</code>.
+                    </p>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="glass surface p-4 h-100">
+                <h2 class="h5 fw-bold mb-3">Execuções recentes</h2>
+                {% if runs %}
+                    <div class="table-responsive">
+                        <table class="table align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Modelo</th>
+                                    <th>Status</th>
+                                    <th style="min-width: 140px;">Progresso</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for run in runs %}
+                                    <tr>
+                                        <td class="fw-semibold">{{ run.id }}</td>
+                                        <td>
+                                            <div class="fw-medium">{{ run.modelo }}</div>
+                                            <div class="text-muted small">{{ run.nome }}</div>
+                                        </td>
+                                        <td>
+                                            {% if run.status == 'done' %}
+                                                <span class="badge text-bg-success">concluída</span>
+                                            {% elif run.status == 'running' %}
+                                                <span class="badge text-bg-primary">executando</span>
+                                            {% elif run.status == 'failed' %}
+                                                <span class="badge text-bg-danger">falhou</span>
+                                            {% elif run.status == 'cancelled' %}
+                                                <span class="badge text-bg-secondary">cancelada</span>
+                                            {% else %}
+                                                <span class="badge text-bg-warning">pendente</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="progress" style="height: 8px;">
+                                                <div class="progress-bar" style="width: {{ run.progresso_pct }}%;"></div>
+                                            </div>
+                                            <div class="small text-muted mt-1">
+                                                {{ run.processadas }}/{{ run.total_noticias }}
+                                            </div>
+                                        </td>
+                                        <td class="text-end">
+                                            <a class="btn btn-sm btn-outline-primary"
+                                               href="{% url 'pipeline_lab_run_detail' run.id %}">Detalhes</a>
+                                            {% if run.status == 'pending' or run.status == 'running' %}
+                                                <form method="post" action="{% url 'pipeline_lab_cancel_run' run.id %}" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <button class="btn btn-sm btn-outline-danger" type="submit">Cancelar</button>
+                                                </form>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <p class="text-muted mb-0">Nenhuma execução criada ainda.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
     <div class="glass surface p-4 mb-4">
-        <h2 class="h5 fw-bold mb-3">Notícia de teste</h2>
+        <h2 class="h5 fw-bold mb-3">Testar notícia avulsa</h2>
         <form method="post">
             {% csrf_token %}
             <div class="row g-3">
-                <div class="col-12">
+                <div class="col-lg-6">
                     <label class="form-label small fw-medium" for="id_titulo">Título *</label>
                     <input type="text" class="form-control" id="id_titulo" name="titulo"
-                           value="{{ form_data.titulo|default:'' }}"
-                           placeholder="Ex.: Petrobras anuncia prejuízo de R$ 5 bilhões no Q3" required>
+                           value="{{ form_data.titulo|default:'' }}" required>
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label small fw-medium" for="id_modelo">Modelo</label>
+                    <input class="form-control" id="id_modelo" name="modelo" list="model-options"
+                           value="{{ selected_model|default:model_choices.0 }}">
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label small fw-medium" for="id_stop">Parar após</label>
+                    <select class="form-select" id="id_stop" name="stop_after">
+                        <option value="1" {% if selected_stop_after == 1 %}selected{% endif %}>Fase 1</option>
+                        <option value="2" {% if selected_stop_after == 2 %}selected{% endif %}>Fase 2</option>
+                        <option value="3" {% if selected_stop_after == 3 %}selected{% endif %}>Fase 3</option>
+                        <option value="4" {% if selected_stop_after == 4 %}selected{% endif %}>Fase 4</option>
+                        <option value="5" {% if selected_stop_after == 5 or not selected_stop_after %}selected{% endif %}>Fase 5</option>
+                    </select>
                 </div>
                 <div class="col-12">
                     <label class="form-label small fw-medium" for="id_descricao">Descrição</label>
-                    <textarea class="form-control" id="id_descricao" name="descricao" rows="3"
-                              placeholder="Resumo curto da notícia...">{{ form_data.descricao|default:'' }}</textarea>
+                    <textarea class="form-control" id="id_descricao" name="descricao" rows="2">{{ form_data.descricao|default:'' }}</textarea>
                 </div>
                 <div class="col-12">
                     <label class="form-label small fw-medium" for="id_conteudo">Conteúdo</label>
-                    <textarea class="form-control" id="id_conteudo" name="conteudo" rows="5"
-                              placeholder="Texto completo da notícia (opcional)...">{{ form_data.conteudo|default:'' }}</textarea>
+                    <textarea class="form-control" id="id_conteudo" name="conteudo" rows="3">{{ form_data.conteudo|default:'' }}</textarea>
                 </div>
-                <div class="col-md-8">
+                <div class="col-lg-8">
                     <label class="form-label small fw-medium" for="id_link">Link</label>
                     <input type="url" class="form-control" id="id_link" name="link"
-                           value="{{ form_data.link|default:'' }}"
-                           placeholder="https://exemplo.com/noticia">
+                           value="{{ form_data.link|default:'' }}">
                 </div>
-                <div class="col-md-4 d-flex align-items-end">
-                    <button class="btn btn-primary w-100" type="submit">Executar Pipeline</button>
+                <div class="col-lg-4 d-flex align-items-end gap-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="id_usar_llm" name="usar_llm"
+                               {% if selected_usar_llm %}checked{% endif %}>
+                        <label class="form-check-label small" for="id_usar_llm">Usar LLM</label>
+                    </div>
+                    <button class="btn btn-primary ms-auto" type="submit">Executar teste</button>
                 </div>
             </div>
         </form>
     </div>
 
     {% if result %}
-    <!-- Resultados -->
-    <div class="glass surface p-4 mb-4">
-        <h2 class="h5 fw-bold mb-3">Resultados do Pipeline</h2>
-
-        <!-- Fase 1 -->
-        <div class="card mb-3 border-0 shadow-sm">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
-                 data-bs-toggle="collapse" data-bs-target="#fase1" role="button" style="cursor:pointer;">
-                <span class="fw-bold">Fase 1 — Relevância Global</span>
-                {% if result.relevancia_global %}
-                    <span class="badge text-bg-success">Aprovada</span>
-                {% else %}
-                    <span class="badge text-bg-danger">Rejeitada</span>
-                {% endif %}
+        <div class="glass surface p-4 mb-4">
+            <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                <h2 class="h5 fw-bold mb-0">Resultado do teste</h2>
+                <span class="badge text-bg-light border">
+                    pipeline {{ t_pipeline }}s · alertas {{ t_alertas }}s
+                </span>
             </div>
-            <div id="fase1" class="collapse show">
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-4">
-                            <div class="text-muted small">Score de relevância</div>
-                            <div class="fw-bold fs-5">{{ result.relevancia_global|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-muted small">Relevância binária</div>
-                            <div class="fw-bold fs-5">{{ result.relevancia_binaria|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="text-muted small">Embedding gerado</div>
-                            <div class="fw-bold fs-5">{% if result.embedding_noticia %}Sim{% else %}Não{% endif %}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {% if result.relevancia_binaria == 1 %}
-        <!-- Fase 2 -->
-        <div class="card mb-3 border-0 shadow-sm">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
-                 data-bs-toggle="collapse" data-bs-target="#fase2" role="button" style="cursor:pointer;">
-                <span class="fw-bold">Fase 2 — Tickers Relacionados</span>
-                <span class="badge text-bg-info">{{ result.tickers_relacionados|length }} encontrado{{ result.tickers_relacionados|length|pluralize }}</span>
-            </div>
-            <div id="fase2" class="collapse show">
-                <div class="card-body">
-                    {% if result.tickers_relacionados %}
-                        <div class="d-flex flex-wrap gap-2">
-                            {% for ticker in result.tickers_relacionados %}
-                                <span class="badge bg-primary p-2">{{ ticker }}</span>
-                            {% endfor %}
-                        </div>
-                    {% else %}
-                        <div class="text-muted">Nenhum ticker relacionado encontrado.</div>
-                    {% endif %}
-                </div>
-            </div>
-        </div>
-
-        <!-- Fase 3 -->
-        <div class="card mb-3 border-0 shadow-sm">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
-                 data-bs-toggle="collapse" data-bs-target="#fase3" role="button" style="cursor:pointer;">
-                <span class="fw-bold">Fase 3 — Heurística</span>
-                <span class="badge text-bg-warning">Score: {{ result.score_heuristico|default:"0" }}</span>
-            </div>
-            <div id="fase3" class="collapse show">
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-6">
-                            <div class="text-muted small">Score heurístico</div>
-                            <div class="fw-bold fs-5">{{ result.score_heuristico|default:"0" }}</div>
-                        </div>
-                        <div class="col-md-6">
-                            <div class="text-muted small">Critérios ativados</div>
-                            <div class="fw-bold">
-                                {% if result.criterios_ativados %}
-                                    {% for criterio in result.criterios_ativados %}
-                                        <span class="badge text-bg-light border me-1">{{ criterio }}</span>
-                                    {% endfor %}
-                                {% else %}
-                                    <span class="text-muted">Nenhum</span>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    {% if result.tickers_encontrados %}
-                    <div class="mt-2">
-                        <div class="text-muted small">Tickers encontrados (regex)</div>
+            <div class="row g-3">
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Fase 1</div>
                         <div class="fw-bold">
-                            {% for t in result.tickers_encontrados %}
-                                <span class="badge bg-primary p-2">{{ t }}</span>
-                            {% endfor %}
+                            {% if result.fase1_aprovada %}aprovada{% elif result.fase1_aprovada is False %}rejeitada{% else %}—{% endif %}
                         </div>
+                        <div class="small">relevância global: {{ result.relevancia_global|floatformat:4|default:"—" }}</div>
                     </div>
-                    {% endif %}
                 </div>
-            </div>
-        </div>
-
-        <!-- Fase 4 -->
-        <div class="card mb-3 border-0 shadow-sm">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
-                 data-bs-toggle="collapse" data-bs-target="#fase4" role="button" style="cursor:pointer;">
-                <span class="fw-bold">Fase 4 — LLM Gate</span>
-                {% if result.relevancia_binaria == 1 %}
-                    <span class="badge text-bg-success">Aprovada</span>
-                {% else %}
-                    <span class="badge text-bg-danger">Rejeitada</span>
-                {% endif %}
-            </div>
-            <div id="fase4" class="collapse show">
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <div class="text-muted small">Decisão</div>
-                            <div class="fw-bold fs-5">{{ result.relevancia_binaria|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-muted small">Confiança</div>
-                            <div class="fw-bold fs-5">{{ result.confianca_fase4|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-muted small">Provider</div>
-                            <div class="fw-bold">{{ result.provider_fase4|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-muted small">Status</div>
-                            <div class="fw-bold">{{ result.status_fase4|default:"—" }}</div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Fase 2 — tickers</div>
+                        <div class="fw-bold">
+                            {% if result.tickers_relacionados %}{{ result.tickers_relacionados|join:", " }}{% else %}—{% endif %}
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <!-- Fase 5 -->
-        <div class="card mb-3 border-0 shadow-sm">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
-                 data-bs-toggle="collapse" data-bs-target="#fase5" role="button" style="cursor:pointer;">
-                <span class="fw-bold">Fase 5 — Classificação Rica</span>
-                <span class="badge text-bg-secondary">{{ result.categoria|default:"—" }}</span>
-            </div>
-            <div id="fase5" class="collapse show">
-                <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-3">
-                            <div class="text-muted small">Sentimento</div>
-                            <div class="fw-bold fs-5 {% if result.sentimento == 'positivo' %}text-success{% elif result.sentimento == 'negativo' %}text-danger{% else %}text-secondary{% endif %}">
-                                {{ result.sentimento|default:"—" }}
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-muted small">Impacto</div>
-                            <div class="fw-bold fs-5">{{ result.impacto|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-muted small">Urgência</div>
-                            <div class="fw-bold fs-5">{{ result.urgencia|default:"—" }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-muted small">Categoria</div>
-                            <div class="fw-bold fs-5">{{ result.categoria|default:"—" }}</div>
-                        </div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Fase 3 — score</div>
+                        <div class="fw-bold">{{ result.score_heuristico|default:"—" }}</div>
+                        <div class="small">{{ result.criterios_ativados|default_if_none:""|join:", " }}</div>
                     </div>
-                    {% if result.explicacao %}
-                    <div class="mt-3">
-                        <div class="text-muted small">Explicação</div>
-                        <div class="glass surface p-2 mt-1">{{ result.explicacao }}</div>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Fase 4 — relevância</div>
+                        <div class="fw-bold">
+                            {% if result.relevancia_binaria == 1 %}relevante{% elif result.relevancia_binaria == 0 %}irrelevante{% else %}—{% endif %}
+                        </div>
+                        <div class="small">{{ result.provider_fase4|default:"" }}</div>
                     </div>
-                    {% endif %}
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Sentimento</div>
+                        <div class="fw-bold">{{ result.sentimento|default:"—" }}</div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Impacto</div>
+                        <div class="fw-bold">{{ result.impacto|default:"—" }}</div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Urgência</div>
+                        <div class="fw-bold">{{ result.urgencia|default:"—" }}</div>
+                    </div>
+                </div>
+                <div class="col-sm-6 col-lg-3">
+                    <div class="border rounded p-3 h-100">
+                        <div class="text-muted small">Categoria</div>
+                        <div class="fw-bold">{{ result.categoria|default:"—" }}</div>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Fase 6 — Simulação de Alertas -->
-        <div class="card mb-3 border-0 shadow-sm">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center"
-                 data-bs-toggle="collapse" data-bs-target="#fase6" role="button" style="cursor:pointer;">
-                <span class="fw-bold">Fase 6 — Simulação de Alertas</span>
-                <span class="badge text-bg-primary">{{ alertas_simulados.alertariam|length }} alertaria{{ alertas_simulados.alertariam|length|pluralize }}</span>
-            </div>
-            <div id="fase6" class="collapse show">
-                <div class="card-body">
+            <details class="mt-3">
+                <summary class="small text-muted">Ver resultado completo (JSON)</summary>
+                <pre class="bg-dark text-light p-3 rounded mt-2 small" style="max-height: 420px; overflow:auto;">{{ result_json }}</pre>
+            </details>
+
+            <div class="row g-3 mt-2">
+                <div class="col-lg-6">
+                    <h3 class="h6 fw-bold">Usuários que alertariam</h3>
                     {% if alertas_simulados.alertariam %}
-                    <h6 class="fw-bold text-success mb-2">Usuários que receberiam alerta</h6>
-                    <div class="table-responsive mb-4">
-                        <table class="table table-sm align-middle">
-                            <thead>
-                                <tr>
-                                    <th>Usuário</th>
-                                    <th>Tickers</th>
-                                    <th>Prioridade</th>
-                                    <th>Score</th>
-                                    <th>Ações</th>
-                                    <th>Explicação</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in alertas_simulados.alertariam %}
-                                <tr>
-                                    <td class="fw-bold">{{ item.username }}</td>
-                                    <td>
-                                        {% for t in item.tickers_casaram %}
-                                            <span class="badge bg-primary p-2">{{ t }}</span>
-                                        {% endfor %}
-                                    </td>
-                                    <td>
-                                        <span class="badge {% if item.prioridade == 'critica' %}text-bg-danger{% elif item.prioridade == 'alta' %}text-bg-warning{% elif item.prioridade == 'media' %}text-bg-info{% else %}text-bg-secondary{% endif %}">
-                                            {{ item.prioridade }}
-                                        </span>
-                                    </td>
-                                    <td>{{ item.score_final|floatformat:2 }}</td>
-                                    <td>
-                                        {% for a in item.acoes %}
-                                            <span class="badge text-bg-light border">{{ a }}</span>
-                                        {% endfor %}
-                                    </td>
-                                    <td class="text-muted small">{{ item.explicacao }}</td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                        <ul class="small mb-0">
+                            {% for item in alertas_simulados.alertariam %}
+                                <li><strong>{{ item.username }}</strong> — {{ item.prioridade }} ({{ item.score_final }})</li>
+                            {% endfor %}
+                        </ul>
                     {% else %}
-                    <div class="text-muted mb-3">Nenhum usuário receberia alerta.</div>
+                        <p class="text-muted small mb-0">Nenhum.</p>
                     {% endif %}
-
+                </div>
+                <div class="col-lg-6">
+                    <h3 class="h6 fw-bold">Usuários que não alertariam</h3>
                     {% if alertas_simulados.nao_alertariam %}
-                    <h6 class="fw-bold text-muted mb-2">Usuários que NÃO receberiam alerta</h6>
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle">
-                            <thead>
-                                <tr>
-                                    <th>Usuário</th>
-                                    <th>Motivo</th>
-                                    <th>Tickers casaram</th>
-                                    <th>Carteira</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for item in alertas_simulados.nao_alertariam %}
-                                <tr>
-                                    <td>{{ item.username }}</td>
-                                    <td class="text-muted">{{ item.motivo }}</td>
-                                    <td>
-                                        {% if item.tickers_casaram %}
-                                            {% for t in item.tickers_casaram %}
-                                                <span class="badge text-bg-light border">{{ t }}</span>
-                                            {% endfor %}
-                                        {% else %}
-                                            <span class="text-muted">—</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="text-muted small">
-                                        {% if item.carteira %}
-                                            {{ item.carteira|join:", " }}
-                                        {% else %}
-                                            —
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
-                    </div>
+                        <ul class="small mb-0">
+                            {% for item in alertas_simulados.nao_alertariam %}
+                                <li><strong>{{ item.username }}</strong> — {{ item.motivo }}</li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="text-muted small mb-0">Nenhum.</p>
                     {% endif %}
                 </div>
             </div>
         </div>
-        {% endif %}
-    </div>
-
-    <!-- Tempos de execução -->
-    <div class="glass surface p-3 mb-4">
-        <div class="d-flex flex-wrap gap-4 text-muted small">
-            <span>Pipeline: <strong>{{ t_pipeline }}s</strong></span>
-            <span>Alertas: <strong>{{ t_alertas }}s</strong></span>
-            <span>Total: <strong>{{ t_pipeline|add:t_alertas }}s</strong></span>
-        </div>
-    </div>
     {% endif %}
 </div>
 {% endblock %}

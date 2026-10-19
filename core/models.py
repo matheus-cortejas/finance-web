@@ -8,6 +8,9 @@ class Ativo(models.Model):
 	ticker = models.CharField(max_length=32, unique=True)
 	nome = models.CharField(max_length=255)
 	source = models.CharField(max_length=32, blank=True, default="")
+	# Texto usado para gerar o embedding do ativo na Fase 2. Se vazio,
+	# o pipeline usa "ticker nome". Permite enriquecer setor/palavras-chave.
+	descricao_embedding = models.TextField(blank=True, default="")
 
 	class Meta:
 		ordering = ["ticker"]
@@ -35,6 +38,8 @@ class Noticia(models.Model):
 	resumo_provider = models.CharField(max_length=32, blank=True, default="")
 	resumo_em = models.DateTimeField(null=True, blank=True)
 	publicado_em = models.DateTimeField(null=True, blank=True)
+	# Momento em que o coletor persistiu a notícia (independente da data do feed).
+	coletado_em = models.DateTimeField(null=True, blank=True, db_index=True)
 	feed_url = models.URLField(blank=True, default="")
 	impacto = models.CharField(max_length=32, blank=True, default="pendente")
 	raw_data = models.JSONField(blank=True, null=True)
@@ -44,6 +49,7 @@ class Noticia(models.Model):
 		ordering = ["-publicado_em", "-id"]
 		indexes = [
 			models.Index(fields=["publicado_em"]),
+			models.Index(fields=["coletado_em"]),
 			models.Index(fields=["impacto"]),
 		]
 

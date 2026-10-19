@@ -6,8 +6,7 @@ class CoreConfig(AppConfig):
     name = 'core'
 
     def ready(self):
+        # O monitor/scheduler não é mais iniciado implicitamente.
+        # Cada serviço roda em seu próprio processo/container, via
+        # `manage.py run_collector`, `run_experiments` etc.
         from core import signals  # noqa: F401
-        from core.startup import start_background_monitor, start_background_scheduler
-
-        start_background_monitor()
-        start_background_scheduler()

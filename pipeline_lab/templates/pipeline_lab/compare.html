@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Comparar execuções | Pipeline Lab{% endblock %}
+
+{% block body %}
+<div class="fade-in">
+    <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+        <div>
+            <a class="small text-decoration-none" href="{% url 'pipeline_lab_home' %}">← Pipeline Lab</a>
+            <h1 class="h2 fw-bold hero-title mb-0 mt-2">Comparar execuções</h1>
+            <p class="hero-subtitle mb-0">Métricas calculadas sobre as notícias com label manual.</p>
+        </div>
+    </div>
+
+    {% if rows %}
+        <div class="glass surface p-4">
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Modelo</th>
+                            <th>Status</th>
+                            <th>Labels</th>
+                            <th>Fase 1 F1</th>
+                            <th>Fase 4 F1</th>
+                            <th>Score F1 (thr.)</th>
+                            <th>Global F1 (thr.)</th>
+                            <th>Cobertura</th>
+                            <th>Tempo médio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in rows %}
+                            <tr>
+                                <td><a href="{% url 'pipeline_lab_run_detail' row.run.id %}">{{ row.run.id }}</a></td>
+                                <td>
+                                    <div class="fw-medium"><code>{{ row.run.modelo }}</code></div>
+                                    <div class="small text-muted">{{ row.run.nome }}</div>
+                                    {% if row.run.embedding_dim %}
+                                        <div class="small text-muted">{{ row.run.embedding_dim }} dims</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if row.run.status == 'done' %}
+                                        <span class="badge text-bg-success">concluída</span>
+                                    {% elif row.run.status == 'running' %}
+                                        <span class="badge text-bg-primary">executando</span>
+                                    {% elif row.run.status == 'failed' %}
+                                        <span class="badge text-bg-danger">falhou</span>
+                                    {% elif row.run.status == 'cancelled' %}
+                                        <span class="badge text-bg-secondary">cancelada</span>
+                                    {% else %}
+                                        <span class="badge text-bg-warning">pendente</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ row.labeled|default:"—" }}</td>
+                                <td>{{ row.fase1_f1|default:"—" }}</td>
+                                <td>{{ row.fase4_f1|default:"—" }}</td>
+                                <td>{{ row.score_f1|default:"—" }} <span class="small text-muted">{{ row.score_threshold|default:"" }}</span></td>
+                                <td>{{ row.global_f1|default:"—" }} <span class="small text-muted">{{ row.global_threshold|default:"" }}</span></td>
+                                <td>{{ row.cobertura|floatformat:2|default:"—" }}</td>
+                                <td>{{ row.tempo_medio|default:"—" }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    {% else %}
+        <div class="glass surface p-4">
+            <p class="text-muted mb-0">Nenhuma execução para comparar.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -7,7 +7,9 @@ certifi==2026.2.25
 charset-normalizer==3.4.6
 distro==1.9.0
 Django==5.2.13
+dj-database-url>=3.0,<4
 feedparser==6.0.12
+gunicorn>=23.0,<24
 h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
@@ -17,6 +19,7 @@ lxml==6.0.2
 openai==2.29.0
 pydantic==2.12.5
 pydantic_core==2.41.5
+psycopg[binary]>=3.2,<4
 python-dotenv==1.2.2
 requests==2.33.0
 sgmllib3k==1.0.0
@@ -28,5 +31,6 @@ typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzlocal==5.3.1
 urllib3==2.6.3
+whitenoise>=6.8,<7
 pyyaml
 sentence-transformers

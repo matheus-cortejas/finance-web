@@ -8,7 +8,7 @@ except ImportError:
     BackgroundScheduler = None
 
 from setup.settings import MONITOR_INTERVAL_SECONDS
-from core.scheduler.jobs import collect_news   # remova cleanup_old_articles se não usar
+from legacy.scheduler.jobs import collect_news   # remova cleanup_old_articles se não usar
 
 logger = logging.getLogger("scheduler.app")
 

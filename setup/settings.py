@@ -9,6 +9,11 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     load_dotenv = None
 
+try:
+    import dj_database_url
+except Exception:  # pragma: no cover - optional dependency
+    dj_database_url = None
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BASE_DIR
@@ -41,6 +46,7 @@ def _env_int(name: str, default: int) -> int:
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "django-insecure-!7*w_xu!*u^j7e)*3-5og_s)qa61#ra+2pc7y+y%4gc2nb!ow3")
 DEBUG = _env_bool("DJANGO_DEBUG", True)
 ALLOWED_HOSTS = _env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
+CSRF_TRUSTED_ORIGINS = _env_list("CSRF_TRUSTED_ORIGINS", "")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -55,6 +61,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -102,9 +109,25 @@ ENABLE_PRIORITY_ENGINE = _env_bool("ENABLE_PRIORITY_ENGINE", False)
 ALERT_MIN_PRIORITY = os.getenv("ALERT_MIN_PRIORITY", "media").lower()
 
 MONITOR_INTERVAL_SECONDS = int(os.getenv("MONITOR_INTERVAL_SECONDS", "300"))
+COLLECTOR_INTERVAL_SECONDS = int(os.getenv("COLLECTOR_INTERVAL_SECONDS", str(MONITOR_INTERVAL_SECONDS)))
 ARTICLE_RETENTION_DAYS = int(os.getenv("ARTICLE_RETENTION_DAYS", "1"))
-START_MONITOR_ON_SERVER = _env_bool("DJANGO_START_MONITOR", True)
-START_SCHEDULER_ON_SERVER = _env_bool("DJANGO_START_SCHEDULER", True)
+START_MONITOR_ON_SERVER = _env_bool("DJANGO_START_MONITOR", False)
+START_SCHEDULER_ON_SERVER = _env_bool("DJANGO_START_SCHEDULER", False)
+
+# ---------------------------------------------------------------------------
+# Experimento do TCC
+# ---------------------------------------------------------------------------
+EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cpu")
+EMBEDDING_MODELS = _env_list(
+    "EMBEDDING_MODELS",
+    "paraphrase-multilingual-MiniLM-L12-v2",
+)
+EXPERIMENT_WORKER_POLL_SECONDS = int(os.getenv("WORKER_POLL_SECONDS", "10"))
+EXPERIMENT_BATCH_SIZE = int(os.getenv("EXPERIMENT_BATCH_SIZE", "16"))
+EXPERIMENT_CACHE_ENABLED = _env_bool("EXPERIMENT_CACHE_ENABLED", False)
+EXPERIMENT_METRICS_PATH = Path(
+    os.getenv("PIPELINE_METRICS_PATH", PROJECT_ROOT / "pipeline_metrics.jsonl")
+)
 
 DATABASES = {
     "default": {
@@ -112,6 +135,14 @@ DATABASES = {
         "NAME": DB_PATH,
     }
 }
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if DATABASE_URL and dj_database_url:
+    DATABASES["default"] = dj_database_url.parse(
+        DATABASE_URL,
+        conn_max_age=int(os.getenv("DB_CONN_MAX_AGE", "60")),
+        conn_health_checks=True,
+    )
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -130,12 +161,24 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = [PROJECT_ROOT / 'static']
-#STATIC_ROOT = PROJECT_ROOT / "static"
+STATIC_ROOT = PROJECT_ROOT / "staticfiles"
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "home"
 LOGOUT_REDIRECT_URL = "login"
+
+# Garante que o diretório de log exista antes de o RotatingFileHandler abrir.
+LOG_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 LOGGING = {
     "version": 1,

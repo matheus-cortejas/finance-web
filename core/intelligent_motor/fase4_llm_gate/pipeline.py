@@ -12,6 +12,7 @@ logger = logging.getLogger("fase4.pipeline")
 def classificar_noticia(
     noticia: Dict[str, Any],
     config: Optional[Dict[str, Any]] = None,
+    usar_llm: bool = True,
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(noticia, dict):
         return None
@@ -50,7 +51,15 @@ def classificar_noticia(
         noticia["confianca_fase4"] = 1.0
         return noticia
 
-    # Faixa intermediária: aciona LLM
+    # Faixa intermediária: usa LLM apenas se permitido. Em experimentos
+    # puramente de embeddings, a Fase 4 deve ser determinística.
+    if not usar_llm:
+        noticia["relevancia_binaria"] = int(fase_cfg.get("fallback_resultado", 1))
+        noticia["provider_fase4"] = "heuristica"
+        noticia["status_fase4"] = "sem_llm"
+        noticia["confianca_fase4"] = 0.5
+        return noticia
+
     title = noticia.get("titulo") or noticia.get("title") or ""
     description = noticia.get("descricao") or noticia.get("description") or ""
     content = noticia.get("conteudo") or noticia.get("content") or None

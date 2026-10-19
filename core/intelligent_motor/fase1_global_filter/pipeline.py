@@ -9,7 +9,7 @@ from .preprocessor import preprocessar_texto
 from .embedding_generator import EmbeddingGenerator
 from .cache_manager import get_cache_manager
 from .similarity import calcular_similaridade
-from .exceptions import ValidationError, ModelError
+from .exceptions import ValidationError, ModelError, PipelineError
 
 # ---------- Função auxiliar de fallback (apenas para compatibilidade) ----------
 def _load_config_from_file() -> Dict[str, Any]:
@@ -49,59 +49,65 @@ def avaliar_relevancia_global(
         config = config.get("fase1", {})   # extrai a subseção
     
     threshold = float(config.get("threshold_relevancia", 0.55))
-    ttl = int(config.get("cache", {}).get("ttl_segundos", 86400))
+    cache_cfg = config.get("cache", {}) or {}
+    cache_enabled = bool(cache_cfg.get("enabled", True))
+    ttl = int(cache_cfg.get("ttl_segundos", 86400))
 
     preproc_text = preprocessar_texto(noticia)
     if not preproc_text:
         return None
 
-    chave = f"emb:{_sha256(preproc_text)}"
+    # O namespace inclui o modelo para que embeddings de modelos diferentes
+    # nunca sejam reutilizados por engano.
+    generator = EmbeddingGenerator.instance(model_name=config.get("modelo"))
+    model_key = generator.model_key
 
-    cache = get_cache_manager()
+    chave = f"emb:{model_key}:{_sha256(preproc_text)}"
+    ref_key = f"ref:financeiro_mult:{model_key}"
+
+    cache = get_cache_manager() if cache_enabled else None
 
     emb_noticia = None
-    try:
-        emb_noticia = cache.get(chave)
-    except Exception:
-        emb_noticia = None
+    if cache is not None:
+        try:
+            emb_noticia = cache.get(chave)
+        except Exception:
+            emb_noticia = None
 
     if emb_noticia is None:
         try:
-            generator = EmbeddingGenerator.instance()
             emb_noticia = generator.gerar(preproc_text)
         except Exception as exc:
             raise ModelError(str(exc))
 
-        try:
-            cache.set(chave, emb_noticia, ttl)
-        except Exception:
-            pass
+        if cache is not None:
+            try:
+                cache.set(chave, emb_noticia, ttl)
+            except Exception:
+                pass
 
     # reference embeddings
-    ref_key = "ref:financeiro_mult"
-
     emb_refs = None
-    try:
-        emb_refs = cache.get(ref_key)
-    except Exception:
-        emb_refs = None
+    if cache is not None:
+        try:
+            emb_refs = cache.get(ref_key)
+        except Exception:
+            emb_refs = None
 
     if emb_refs is None:
         centroides = config.get("centroides_referencia", [])
         if not centroides:
             centroides = ["Análise financeira e mercado econômico"]
-        try:               
-            generator = EmbeddingGenerator.instance()
-            emb_refs = []
-            for idx, texto in enumerate(centroides):
-                emb_refs.append(generator.gerar(texto))
+        try:
+            emb_refs = generator.gerar_lote(centroides)
         except Exception as exc:
             raise ModelError(str(exc))
 
-        try:
-            cache.set(ref_key, emb_refs, ttl)
-        except Exception:
-            pass
+        if cache is not None:
+            try:
+                cache.set(ref_key, emb_refs, ttl)
+            except Exception:
+                pass
 
     try:
         scores = []

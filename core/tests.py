@@ -1,419 +1,366 @@
 from __future__ import annotations
 
-import os
+import csv
+import json
+from datetime import datetime, timedelta, timezone
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "setup.settings")
-
-import django
-
-django.setup()
-
 from django.contrib.auth.models import User
-from django.test import TestCase, override_settings
-from django.urls import reverse
-from unittest.mock import patch
+from django.core.management import call_command
+from django.test import Client, TestCase
 
-from core.llm import openai_client
-from core.models import (
-    Alerta,
-    Ativo,
-    Carteira,
-    InteracaoNoticia,
-    Noticia,
-    NoticiaClassificacao,
-    NoticiaScore,
-    PerfilInvestidor,
+from core.intelligent_motor.fase2_tickers.asset_embedding_store import (
+    AssetEmbeddingStore,
+    get_asset_embedding_store,
+    reset_asset_embedding_stores,
 )
-from core.services import noticia_service
-from core.services.interacao_service import update_profile_from_interactions
-from core.services.scoring_service import calculate_relevance_score, score_to_priority
+from core.intelligent_motor.fase4_llm_gate.pipeline import classificar_noticia
+from core.intelligent_motor.fase5_rich_classification.pipeline import (
+    classificar_noticia_rica,
+)
+from core.models import Ativo, FonteRSS, Noticia
+from core.services.collector_service import (
+    collect_feed,
+    normalize_link,
+    sync_feeds_from_file,
+)
+from pipeline_lab.models import (
+    AssetEmbedding,
+    ExperimentRun,
+    NewsLabel,
+    RunClassification,
+)
+from pipeline_lab.services.experiments import build_noticias_queryset, create_run
+from pipeline_lab.services.metrics import compute_run_metrics
 
 
-class WebViewsTests(TestCase):
-    def setUp(self):
-        self.username = f"webuser_{uuid4().hex[:8]}"
-        self.user = User.objects.create_user(username=self.username, password="secret")
-        self.asset, _ = Ativo.objects.get_or_create(ticker="PETR4", defaults={"nome": "Petrobras", "source": "b3"})
-
-    def test_dashboard_redirects_anonymous_users(self):
-        response = self.client.get(reverse("dashboard"))
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse("login"), response.url)
-
-    def test_home_redirects_anonymous_users_to_login(self):
-        response = self.client.get(reverse("home"))
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse("login"), response.url)
-
-    def test_home_redirects_authenticated_users_to_dashboard(self):
-        self.client.login(username=self.username, password="secret")
-        response = self.client.get(reverse("home"))
-        self.assertEqual(response.status_code, 302)
-        self.assertIn(reverse("dashboard"), response.url)
-
-    def test_dashboard_renders_for_authenticated_user(self):
-        self.client.login(username=self.username, password="secret")
-        response = self.client.get(reverse("dashboard"))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Monitor Financeiro")
-
-    def test_search_with_multiple_matches_shows_info_message(self):
-        Ativo.objects.create(ticker="VALE3", nome="Vale S.A.")
-        Ativo.objects.create(ticker="VALE4", nome="Vale S.A. PN")
-        self.client.login(username=self.username, password="secret")
-        response = self.client.post(reverse("dashboard"), {"asset_term": "VALE"}, follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Mais de um ativo encontrado")
-
-    def test_empty_asset_term_shows_warning(self):
-        self.client.login(username=self.username, password="secret")
-        response = self.client.post(reverse("dashboard"), {"asset_term": ""}, follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Informe um código ou nome de ativo.")
-
-    def test_dashboard_adds_unique_asset_to_carteira(self):
-        self.client.login(username=self.username, password="secret")
-        response = self.client.post(reverse("dashboard"), {"asset_term": "PETR4"}, follow=True)
-        self.assertEqual(response.status_code, 200)
-        carteira = Carteira.objects.get(usuario=self.user)
-        self.assertTrue(carteira.ativos.filter(ticker="PETR4").exists())
-
-    def test_asset_suggestions_returns_prefix_matches(self):
-        Ativo.objects.create(ticker="PETZ3", nome="Petz", source="b3")
-        Ativo.objects.create(ticker="PEAB3", nome="Peabirus", source="b3")
-        Ativo.objects.create(ticker="VALE3", nome="Vale S.A.", source="b3")
-
-        self.client.login(username=self.username, password="secret")
-        response = self.client.get(reverse("asset_suggestions"), {"q": "pe"})
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        tickers = [item["ticker"] for item in payload["results"]]
-        self.assertIn("PEAB3", tickers)
-        self.assertIn("PETR4", tickers)
-        self.assertIn("PETZ3", tickers)
-        self.assertNotIn("VALE3", tickers)
-
-    def test_dashboard_removes_asset_from_carteira(self):
-        carteira, _ = Carteira.objects.get_or_create(usuario=self.user)
-        carteira.ativos.add(self.asset)
-
-        self.client.login(username=self.username, password="secret")
-        response = self.client.post(reverse("dashboard"), {"remove_asset_id": str(self.asset.id)}, follow=True)
-
-        self.assertEqual(response.status_code, 200)
-        carteira.refresh_from_db()
-        self.assertFalse(carteira.ativos.filter(ticker="PETR4").exists())
-        self.assertContains(response, "PETR4 removido da sua carteira.")
-
-    def test_dashboard_logout_uses_post_and_redirects_to_login(self):
-        self.client.login(username=self.username, password="secret")
-        response = self.client.post(reverse("logout"), follow=True)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Entrar")
-        self.assertFalse(response.wsgi_request.user.is_authenticated)
-
-    def test_dashboard_added_asset_receives_alerts_from_news_pipeline(self):
-        self.client.login(username=self.username, password="secret")
-        self.client.post(reverse("dashboard"), {"asset_term": "PETR4"}, follow=True)
-
-        parser = type(
-            "ParserStub",
-            (),
-            {
-                "fetch": lambda self: {
-                    "href": "https://example.test/feed",
-                    "entries": [
-                        {
-                            "title": "Petrobras anuncia investimento",
-                            "description": "PETR4 amplia refino",
-                            "summary": "",
-                            "content": [],
-                            "link": "https://example.test/petrobras-dashboard",
-                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                        }
-                    ],
-                }
-            },
-        )()
-
-        original_asset = self.asset
-        with patch.object(noticia_service, "create_parser", return_value=parser), \
-            patch.object(noticia_service, "seen_article", return_value=False), \
-            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
-            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}):
-            noticia_service.check_feeds_and_report(
-                ["https://example.test/feed"],
-                [{"id": original_asset.id, "code": original_asset.ticker, "name": original_asset.nome}],
-                within_days=1,
-            )
-
-        response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Petrobras anuncia investimento")
-        self.assertContains(response, "Resumo gerado")
-        self.assertContains(response, 'target="_blank"')
-
-    def test_alert_created_when_match_only_in_content(self):
-        self.client.login(username=self.username, password="secret")
-        self.client.post(reverse("dashboard"), {"asset_term": "PETR4"}, follow=True)
-
-        parser = type(
-            "ParserStub",
-            (),
-            {
-                "fetch": lambda self: {
-                    "href": "https://example.test/feed",
-                    "entries": [
-                        {
-                            "title": "Mercado em foco",
-                            "description": "",
-                            "summary": "",
-                            "content": ["PETR4 avanca com novos dados"],
-                            "link": "https://example.test/petrobras-content",
-                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                        }
-                    ],
-                }
-            },
-        )()
-
-        original_asset = self.asset
-        with patch.object(noticia_service, "create_parser", return_value=parser), \
-            patch.object(noticia_service, "seen_article", return_value=False), \
-            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
-            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}):
-            noticia_service.check_feeds_and_report(
-                ["https://example.test/feed"],
-                [{"id": original_asset.id, "code": original_asset.ticker, "name": original_asset.nome}],
-                within_days=1,
-            )
-
-        response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Mercado em foco")
-
-    def test_alert_created_when_alias_matches_content(self):
-        self.client.login(username=self.username, password="secret")
-        self.client.post(reverse("dashboard"), {"asset_term": "PETR4"}, follow=True)
-
-        parser = type(
-            "ParserStub",
-            (),
-            {
-                "fetch": lambda self: {
-                    "href": "https://example.test/feed",
-                    "entries": [
-                        {
-                            "title": "Noticias do setor",
-                            "description": "",
-                            "summary": "",
-                            "content": ["PETR sobe no pregão"],
-                            "link": "https://example.test/petrobras-alias",
-                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                        }
-                    ],
-                }
-            },
-        )()
-
-        original_asset = self.asset
-        with patch.object(noticia_service, "create_parser", return_value=parser), \
-            patch.object(noticia_service, "seen_article", return_value=False), \
-            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
-            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}):
-            noticia_service.check_feeds_and_report(
-                ["https://example.test/feed"],
-                [{"id": original_asset.id, "code": original_asset.ticker, "name": original_asset.nome}],
-                within_days=1,
-            )
-
-        response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Noticias do setor")
+def make_noticia(**overrides) -> Noticia:
+    now = datetime.now(timezone.utc)
+    data = {
+        "link": f"https://example.com/{uuid4().hex}",
+        "titulo": "Notícia de teste",
+        "descricao": "Descrição de teste",
+        "conteudo": "Conteúdo de teste",
+        "publicado_em": now,
+        "coletado_em": now,
+        "feed_url": "https://example.com/feed/",
+    }
+    data.update(overrides)
+    return Noticia.objects.create(**data)
 
 
-class ClassificationParsingTests(TestCase):
-    def test_normalize_classification_payload_clamps_values(self):
-        payload = {
-            "sentimento": "bullish",
-            "impacto": "mega",
-            "urgencia": "agora",
-            "tipo_evento": "foo",
-            "relevancia_llm": 2.5,
+class CollectorServiceTests(TestCase):
+    def test_normalize_link_remove_tracking_e_fragmento(self):
+        self.assertEqual(
+            normalize_link(
+                "HTTPS://Example.COM/noticia?utm_source=x&b=1&fbclid=abc#topo"
+            ),
+            "https://example.com/noticia?b=1",
+        )
+
+    def test_collect_feed_persiste_cru_e_deduplica(self):
+        now = datetime.now(timezone.utc)
+        parser = MagicMock()
+        parser.fetch.return_value = {
+            "href": "https://feed.test/rss",
+            "entries": [
+                {
+                    "link": "https://example.com/nova?utm_source=feed",
+                    "title": "Nova",
+                    "description": "Desc",
+                    "content": "Conteúdo",
+                    "published": now,
+                    "raw": {"id": "1"},
+                },
+                {
+                    "link": "https://example.com/antiga",
+                    "title": "Antiga",
+                    "description": "Desc",
+                    "content": "Conteúdo",
+                    "published": now - timedelta(days=10),
+                    "raw": {"id": "2"},
+                },
+            ],
         }
-        normalized = openai_client._normalize_classification_payload(payload)
 
-        self.assertEqual(normalized["sentimento"], "neutro")
-        self.assertEqual(normalized["impacto"], "medio")
-        self.assertEqual(normalized["urgencia"], "media")
-        self.assertEqual(normalized["tipo_evento"], "outro")
-        self.assertEqual(normalized["relevancia_llm"], 1.0)
+        with patch(
+            "core.services.collector_service.create_parser",
+            return_value=parser,
+        ):
+            result = collect_feed("https://feed.test/rss", within_days=2)
+            self.assertEqual(result.criadas, 1)
+            self.assertEqual(result.antigas, 1)
+
+            noticia = Noticia.objects.get()
+            self.assertEqual(noticia.link, "https://example.com/nova")
+            self.assertIsNotNone(noticia.coletado_em)
+            self.assertEqual(noticia.raw_data, {"id": "1"})
+            self.assertEqual(noticia.feed_url, "https://feed.test/rss")
+
+            again = collect_feed("https://feed.test/rss", within_days=2)
+            self.assertEqual(again.criadas, 0)
+            self.assertEqual(again.duplicadas, 1)
+            self.assertEqual(Noticia.objects.count(), 1)
+
+    def test_sync_feeds_from_file_e_idempotente(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "rss.txt"
+            path.write_text(
+                "# comentário\nhttps://a.example/feed/\n\nhttps://b.example/feed/\n",
+                encoding="utf-8",
+            )
+
+            created, total = sync_feeds_from_file(path)
+            self.assertEqual(created, 2)
+            self.assertEqual(total, 2)
+            self.assertEqual(FonteRSS.objects.count(), 2)
+
+            created_again, _ = sync_feeds_from_file(path)
+            self.assertEqual(created_again, 0)
+            self.assertEqual(FonteRSS.objects.count(), 2)
 
 
-class ScoringServiceTests(TestCase):
-    def test_calculate_relevance_score_returns_priority(self):
-        classificacao = {
-            "sentimento": "negativo",
-            "impacto": "alto",
-            "urgencia": "alta",
-            "setor": "energia",
-            "tickers_relacionados": ["PETR4"],
-            "relevancia_llm": 1.0,
-        }
-        perfil = PerfilInvestidor(
-            perfil_risco="moderado",
-            sensibilidade_negativo=0.6,
-            setores_preferidos=["energia"],
-        )
-        result = calculate_relevance_score(
-            classificacao,
-            perfil=perfil,
-            carteira_tickers=["PETR4"],
-            fonte_confiabilidade=1.0,
-        )
-
-        self.assertGreaterEqual(result["score_final"], 85.0)
-        self.assertEqual(result["prioridade"], "critica")
-        self.assertEqual(score_to_priority(result["score_final"]), "critica")
-
-
-class InteractionProfileTests(TestCase):
+class ExportDatasetTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username=f"user_{uuid4().hex[:6]}", password="secret")
-
-    def test_record_interaction_updates_profile(self):
-        noticia = Noticia.objects.create(
-            link="https://example.test/n1",
-            titulo="Queda forte",
+        self.com_conteudo = make_noticia(
+            titulo="Com conteúdo", conteudo="Texto completo"
         )
-        NoticiaClassificacao.objects.create(
-            noticia=noticia,
-            sentimento="negativo",
+        self.sem_conteudo = make_noticia(
+            titulo="Sem conteúdo", conteudo=""
+        )
+        self.outra = make_noticia(titulo="Outra", conteudo="Mais texto")
+        NewsLabel.objects.create(
+            noticia=self.com_conteudo,
+            relevancia=True,
+            sentimento="positivo",
             impacto="alto",
-            urgencia="alta",
-            setor="energia",
+            categoria="empresa",
+            anotador="teste",
         )
 
-        self.client.login(username=self.user.username, password="secret")
-        response = self.client.post(
-            reverse("record_interaction"),
-            {"noticia_id": noticia.id, "acao": "abriu", "origem": "dashboard"},
+    def test_exporta_jsonl_manifest_e_csv(self):
+        with TemporaryDirectory() as tmp:
+            call_command(
+                "export_dataset",
+                output=tmp,
+                name="ds",
+                sample_size=2,
+                stdout=StringIO(),
+            )
+            output = Path(tmp) / "ds"
+
+            manifest = json.loads(
+                (output / "manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(manifest["total_noticias"], 3)
+            self.assertEqual(manifest["com_conteudo"], 2)
+            self.assertEqual(manifest["com_label"], 1)
+            self.assertIn("sha256", manifest["arquivos"]["noticias"])
+
+            lines = (output / "noticias.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            self.assertEqual(len(lines), 3)
+            first = json.loads(lines[0])
+            self.assertIn("classificacao_legada", first)
+            self.assertEqual(first["label"]["relevancia"], True)
+
+            with (output / "annotation_sample.csv").open(
+                encoding="utf-8-sig", newline=""
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 2)
+
+    def test_amostra_prioriza_noticias_com_conteudo(self):
+        with TemporaryDirectory() as tmp:
+            call_command(
+                "export_dataset",
+                output=tmp,
+                name="ds",
+                sample_size=1,
+                stdout=StringIO(),
+            )
+            with (Path(tmp) / "ds" / "annotation_sample.csv").open(
+                encoding="utf-8-sig", newline=""
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 1)
+            self.assertTrue(rows[0]["conteudo"])
+
+
+class ExperimentServiceTests(TestCase):
+    def test_create_run_respeita_limite(self):
+        for _ in range(3):
+            make_noticia()
+        run = create_run(
+            modelo="modelo/fake",
+            nome="teste",
+            limite=2,
+            stop_after=1,
+            usar_llm=False,
+        )
+        self.assertEqual(run.status, ExperimentRun.STATUS_PENDING)
+        self.assertEqual(run.total_noticias, 2)
+        self.assertEqual(run.config["stop_after"], 1)
+        self.assertFalse(run.config["usar_llm"])
+        self.assertEqual(build_noticias_queryset(run.config).count(), 2)
+
+    def test_claim_pending_run(self):
+        from pipeline_lab.services.experiments import claim_pending_run
+
+        run = create_run(modelo="modelo/fake", limite=1, stop_after=1)
+        claimed = claim_pending_run(run.id)
+        self.assertIsNotNone(claimed)
+        self.assertEqual(claimed.status, ExperimentRun.STATUS_RUNNING)
+        self.assertIsNotNone(claimed.iniciado_em)
+
+    def test_compute_metrics_com_labels(self):
+        n1 = make_noticia()
+        n2 = make_noticia()
+        run = ExperimentRun.objects.create(
+            nome="métricas",
+            modelo="modelo/fake",
+            total_noticias=2,
+        )
+        NewsLabel.objects.create(noticia=n1, relevancia=True)
+        NewsLabel.objects.create(noticia=n2, relevancia=False)
+
+        RunClassification.objects.create(
+            run=run,
+            noticia=n1,
+            fase1_aprovada=True,
+            relevancia_global=0.9,
+            score_heuristico=10,
+            relevancia_binaria=True,
+        )
+        RunClassification.objects.create(
+            run=run,
+            noticia=n2,
+            fase1_aprovada=False,
+            relevancia_global=0.1,
+            score_heuristico=1,
+            relevancia_binaria=False,
         )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(
-            InteracaoNoticia.objects.filter(usuario=self.user, noticia=noticia, abriu=True).exists()
+        metrics = compute_run_metrics(run)
+        self.assertEqual(metrics["labeled_total"], 2)
+        self.assertEqual(metrics["fase1"]["metricas"]["f1"], 1.0)
+        self.assertEqual(metrics["fase4"]["metricas"]["f1"], 1.0)
+        self.assertEqual(
+            metrics["score_heuristico"]["best"]["f1"], 1.0
+        )
+        self.assertEqual(metrics["cobertura"], 1.0)
+
+    def test_compute_metrics_sem_labels(self):
+        make_noticia()
+        run = ExperimentRun.objects.create(
+            nome="sem labels",
+            modelo="modelo/fake",
+            total_noticias=1,
+        )
+        metrics = compute_run_metrics(run)
+        self.assertEqual(metrics["labeled_total"], 0)
+        self.assertEqual(metrics["fase1"]["metricas"]["total"], 0)
+
+
+class AssetEmbeddingStoreTests(TestCase):
+    def tearDown(self):
+        reset_asset_embedding_stores()
+        AssetEmbedding.objects.filter(modelo="modelo/teste").delete()
+
+    def test_save_e_matrix(self):
+        store = AssetEmbeddingStore(model_name="modelo/teste")
+        store.save("AAA", [1.0, 0.0, 0.0], description="Ativo A")
+        store.save("BBB", [0.0, 1.0, 0.0], description="Ativo B")
+
+        present, matrix = store.get_matrix(["AAA", "BBB"])
+        self.assertEqual(present, ["AAA", "BBB"])
+        self.assertEqual(matrix.shape, (2, 3))
+
+        vector = matrix[0]
+        self.assertAlmostEqual(float(vector[0]), 1.0, places=5)
+        self.assertAlmostEqual(float(vector[1]), 0.0, places=5)
+
+        self.assertIs(
+            get_asset_embedding_store("modelo/teste"),
+            get_asset_embedding_store("modelo/teste"),
         )
 
-        perfil = PerfilInvestidor.objects.get(usuario=self.user)
-        update_profile_from_interactions(self.user)
-        perfil.refresh_from_db()
-        self.assertGreaterEqual(perfil.sensibilidade_negativo, 0.8)
-        self.assertIn("energia", perfil.setores_preferidos)
+
+class NoLLMPipelineTests(TestCase):
+    def test_fase4_sem_llm_usa_fallback(self):
+        result = classificar_noticia(
+            {"score_heuristico": 4, "titulo": "Teste"},
+            config={
+                "fase4": {
+                    "faixa_llm": {"minimo": 3, "maximo": 6},
+                    "fallback_resultado": 1,
+                }
+            },
+            usar_llm=False,
+        )
+        self.assertEqual(result["relevancia_binaria"], 1)
+        self.assertEqual(result["provider_fase4"], "heuristica")
+        self.assertEqual(result["status_fase4"], "sem_llm")
+
+    def test_fase5_sem_llm_usa_fallback_heuristico(self):
+        result = classificar_noticia_rica(
+            {
+                "relevancia_binaria": 1,
+                "titulo": "Empresa anuncia lucro",
+                "descricao": "Resultado positivo",
+                "conteudo": "",
+                "score_heuristico": 4,
+                "tickers_relacionados": [],
+            },
+            config={"fase5": {}},
+            usar_llm=False,
+        )
+        self.assertEqual(result["provider_fase5"], "heuristica")
+        self.assertTrue(result["fallback_fase5"])
+        self.assertIn(result["sentimento"], {"positivo", "negativo", "neutro"})
 
 
-class PriorityPipelineTests(TestCase):
+class PipelineLabWebTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username=f"user_{uuid4().hex[:6]}", password="secret")
-        self.asset = Ativo.objects.create(ticker="PETR4", nome="Petrobras", source="b3")
-        carteira, _ = Carteira.objects.get_or_create(usuario=self.user)
-        carteira.ativos.add(self.asset)
+        self.staff = User.objects.create_user(
+            username="staff", password="x", is_staff=True
+        )
+        self.user = User.objects.create_user(username="user", password="x")
 
-    @override_settings(ENABLE_PRIORITY_ENGINE=True, ALERT_MIN_PRIORITY="alta")
-    def test_priority_engine_creates_score_and_alert(self):
-        parser = type(
-            "ParserStub",
-            (),
+    def test_home_exige_staff(self):
+        client = Client()
+        client.force_login(self.user)
+        response = client.get("/lab/")
+        self.assertEqual(response.status_code, 302)
+
+        client.force_login(self.staff)
+        response = client.get("/lab/")
+        self.assertEqual(response.status_code, 200)
+
+    def test_criar_e_cancelar_run_pela_web(self):
+        make_noticia()
+        client = Client()
+        client.force_login(self.staff)
+
+        response = client.post(
+            "/lab/runs/create/",
             {
-                "fetch": lambda self: {
-                    "href": "https://example.test/feed",
-                    "entries": [
-                        {
-                            "title": "Petrobras anuncia investimento",
-                            "description": "PETR4 amplia refino",
-                            "summary": "",
-                            "content": [],
-                            "link": "https://example.test/petrobras-score",
-                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                        }
-                    ],
-                }
+                "modelo": "modelo/fake",
+                "nome": "web",
+                "limite": "1",
+                "stop_after": "1",
             },
-        )()
+        )
+        self.assertEqual(response.status_code, 302)
+        run = ExperimentRun.objects.latest("id")
+        self.assertEqual(run.status, ExperimentRun.STATUS_PENDING)
 
-        classification = {
-            "sentimento": "negativo",
-            "impacto": "alto",
-            "urgencia": "alta",
-            "setor": "energia",
-            "tipo_evento": "fato_relevante",
-            "tickers_relacionados": ["PETR4"],
-            "relevancia_llm": 1.0,
-            "provider": "test",
-            "status": "ok",
-        }
-
-        with patch.object(noticia_service, "create_parser", return_value=parser), \
-            patch.object(noticia_service, "seen_article", return_value=False), \
-            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
-            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}), \
-            patch.object(noticia_service, "classify_article", return_value=classification):
-            noticia_service.check_feeds_and_report(
-                ["https://example.test/feed"],
-                [{"id": self.asset.id, "code": self.asset.ticker, "name": self.asset.nome}],
-                within_days=1,
-            )
-
-        self.assertTrue(NoticiaScore.objects.filter(usuario=self.user).exists())
-        self.assertTrue(Alerta.objects.filter(usuario=self.user, ativo=self.asset).exists())
-
-    @override_settings(ENABLE_PRIORITY_ENGINE=True, ALERT_MIN_PRIORITY="alta")
-    def test_priority_engine_respects_threshold(self):
-        parser = type(
-            "ParserStub",
-            (),
-            {
-                "fetch": lambda self: {
-                    "href": "https://example.test/feed",
-                    "entries": [
-                        {
-                            "title": "Nota neutra",
-                            "description": "PETR4 noticia sem impacto",
-                            "summary": "",
-                            "content": [],
-                            "link": "https://example.test/petrobras-low",
-                            "published": __import__("datetime").datetime.now(__import__("datetime").timezone.utc),
-                        }
-                    ],
-                }
-            },
-        )()
-
-        classification = {
-            "sentimento": "neutro",
-            "impacto": "baixo",
-            "urgencia": "baixa",
-            "setor": "energia",
-            "tipo_evento": "outro",
-            "tickers_relacionados": ["PETR4"],
-            "relevancia_llm": 0.1,
-            "provider": "test",
-            "status": "ok",
-        }
-
-        perfil = PerfilInvestidor.objects.get(usuario=self.user)
-        perfil.alerta_min_prioridade = "alta"
-        perfil.save(update_fields=["alerta_min_prioridade"])
-
-        with patch.object(noticia_service, "create_parser", return_value=parser), \
-            patch.object(noticia_service, "seen_article", return_value=False), \
-            patch.object(noticia_service, "is_relevant", return_value={"relevant": True, "matched": ["PETR4"], "reason": "match"}), \
-            patch.object(noticia_service, "summarize_article", return_value={"summary": "Resumo gerado", "status": "ok", "provider": "openai"}), \
-            patch.object(noticia_service, "classify_article", return_value=classification):
-            noticia_service.check_feeds_and_report(
-                ["https://example.test/feed"],
-                [{"id": self.asset.id, "code": self.asset.ticker, "name": self.asset.nome}],
-                within_days=1,
-            )
-
-        self.assertTrue(NoticiaScore.objects.filter(usuario=self.user).exists())
-        self.assertFalse(Alerta.objects.filter(usuario=self.user, ativo=self.asset).exists())
+        response = client.post(f"/lab/runs/{run.id}/cancel/")
+        self.assertEqual(response.status_code, 302)
+        run.refresh_from_db()
+        self.assertEqual(run.status, ExperimentRun.STATUS_CANCELLED)

@@ -15,6 +15,7 @@ def classificar_noticia_rica(
     noticia: dict,
     config: Optional[dict] = None,
     classifier: Optional[LLMClassifier] = None,
+    usar_llm: bool = True,
 ) -> dict:
     """
     Executa a Fase 5 - Classificação Rica.
@@ -36,6 +37,13 @@ def classificar_noticia_rica(
     # Apenas notícias aprovadas na Fase 4
     if noticia.get("relevancia_binaria") != 1:
         logger.debug("Fase5 ignorada para notícia não aprovada pela Fase4")
+        return noticia
+
+    if not usar_llm:
+        fallback_result = fallback_classify(noticia=noticia, config=fase5_cfg)
+        noticia.update(fallback_result)
+        noticia["provider_fase5"] = "heuristica"
+        noticia["fallback_fase5"] = True
         return noticia
 
     if classifier is None:

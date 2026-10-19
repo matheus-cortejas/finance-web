@@ -21,6 +21,7 @@ import json
 import os
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Any, Iterable, List, Tuple
 
 _write_lock = threading.Lock()
@@ -63,6 +64,7 @@ def registrar_metrica(metrica: Dict[str, Any], config: Dict[str, Any] = None) ->
     linha = json.dumps(registro, ensure_ascii=False, default=str)
 
     try:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         with _write_lock:
             with open(path, "a", encoding="utf-8") as f:
                 f.write(linha + "\n")

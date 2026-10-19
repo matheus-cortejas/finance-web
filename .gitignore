@@ -10,3 +10,7 @@ core/intelligent_motor/models/
 *.pyc
 .mimocode
 .claudecode
+exports/
+staticfiles/
+pipeline_metrics.jsonl
+artigo/

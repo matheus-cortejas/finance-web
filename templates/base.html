@@ -53,6 +53,13 @@
                             Alertas
                         </a>
                     </li>
+                    {% if user.is_staff %}
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.resolver_match.url_name == 'pipeline_lab_home' %}active{% endif %}" href="{% url 'pipeline_lab_home' %}">
+                            Pipeline Lab
+                        </a>
+                    </li>
+                    {% endif %}
                 </ul>
                 <div class="d-flex align-items-center gap-2">
                     <span class="badge text-bg-light border px-3 py-2">{{ user.username }}</span>

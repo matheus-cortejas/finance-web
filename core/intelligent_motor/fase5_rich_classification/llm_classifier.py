@@ -38,10 +38,11 @@ class LLMClassifier:
         # Extrai configuração da fase5 (subseção "llm")
         if config is None:
             llm_cfg = {}
+            cache_cfg = {}
         else:
             fase5_cfg = config.get("fase5", {})
             llm_cfg = fase5_cfg.get("llm", {})
-            cache_cfg = fase5_cfg.get("cache", {})         
+            cache_cfg = fase5_cfg.get("cache", {})
 
         self.provider = llm_cfg.get("provider", "openai")
         self.model = llm_cfg.get("model", "gpt-4o-mini")
@@ -107,7 +108,7 @@ class LLMClassifier:
             try:
                 if OpenAI is None:
                     raise ImportError("openai package not installed")
-                self.client = OpenAI(api_key=api_key, timeout=self.timeout_seconds)
+                self.client = OpenAI(api_key=api_key, timeout=self.timeout)
                 logger.info("Cliente OpenAI criado com sucesso na Fase 5")
             except Exception as e:
                 logger.exception(f"Falha ao criar cliente OpenAI: {e}")

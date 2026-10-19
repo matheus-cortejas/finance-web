@@ -3,7 +3,7 @@ from __future__ import annotations
 from django.core.management.base import BaseCommand
 
 from setup.settings import DEFAULT_RSS_PATH
-from core.management.workflows import run_scheduler_workflow
+from legacy.workflows import run_scheduler_workflow
 
 
 class Command(BaseCommand):
