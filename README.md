@@ -72,8 +72,10 @@ Preservando IDs, 16.348 notícias e 9.140 classificações:
 docker compose --profile tools run --rm migrate-data
 ```
 
-O comando falha de propósito se o destino já tiver notícias; use
-`--force` (via `command` do serviço) apenas quando quiser sobrescrever.
+Se `./db.sqlite3` não existir, o serviço falha com uma mensagem clara (sem
+criar um diretório vazio no host). O comando também falha de propósito se o
+destino já tiver notícias; use `--force` (via `command` do serviço) apenas
+quando quiser sobrescrever.
 
 ## Comandos de gerenciamento
 

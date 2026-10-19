@@ -68,11 +68,9 @@ services:
     profiles: ["tools"]
     restart: "no"
     command:
-      - python
-      - manage.py
-      - migrate_sqlite_to_postgres
-      - --source
-      - /app/db.sqlite3
+      - sh
+      - -c
+      - "test -f /src/db.sqlite3 || { echo 'ERRO: ./db.sqlite3 nao encontrado na raiz do projeto.'; echo 'Copie o arquivo do corpus para a raiz e rode de novo.'; exit 1; }; python manage.py migrate_sqlite_to_postgres --source /src/db.sqlite3"
     environment:
       <<: *app-env
       LOG_FILE_PATH: /app/logs/migrate-data.log
@@ -84,7 +82,10 @@ services:
       - ./core/intelligent_motor/models:/app/core/intelligent_motor/models:ro
       - ./rss.txt:/app/rss.txt:ro
       - ./core_ativos.json:/app/core_ativos.json:ro
-      - ./db.sqlite3:/app/db.sqlite3:ro
+      # Monta a raiz do projeto read-only em /src. É um diretório que sempre
+      # existe, então o Docker não cria um ./db.sqlite3 vazio quando o arquivo
+      # do corpus está ausente (o comando acima falha com mensagem clara).
+      - ./:/src:ro
     depends_on:
       db:
         condition: service_healthy
