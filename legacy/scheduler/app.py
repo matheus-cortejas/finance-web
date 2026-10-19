@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import logging
+import os
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
 except ImportError:
     BackgroundScheduler = None
 
-from setup.settings import MONITOR_INTERVAL_SECONDS
 from legacy.scheduler.jobs import collect_news   # remova cleanup_old_articles se não usar
+
+MONITOR_INTERVAL_SECONDS = int(os.getenv("MONITOR_INTERVAL_SECONDS", "300"))
 
 logger = logging.getLogger("scheduler.app")
 

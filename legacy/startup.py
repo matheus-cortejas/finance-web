@@ -6,16 +6,27 @@ import sys
 import threading
 
 from setup.logger import configure_logging
-from setup.settings import (
-    DEFAULT_B3_CSV,
-    DEFAULT_RSS_PATH,
-    START_MONITOR_ON_SERVER,
-    START_SCHEDULER_ON_SERVER,
-)
+from setup.settings import DEFAULT_B3_CSV, DEFAULT_RSS_PATH
 from legacy.workflows import (
     run_monitor_workflow,
     run_scheduler_workflow,
 )
+
+
+# O legado lê as flags direto do ambiente: essas settings foram removidas
+# do setup.settings na limpeza do software antigo.
+START_MONITOR_ON_SERVER = os.getenv("DJANGO_START_MONITOR", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+START_SCHEDULER_ON_SERVER = os.getenv("DJANGO_START_SCHEDULER", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 logger = logging.getLogger("startup")

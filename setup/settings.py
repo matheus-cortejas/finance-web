@@ -35,10 +35,6 @@ def _env_list(name: str, default: str = "") -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
-def _env_float(name: str, default: float) -> float:
-    return float(os.getenv(name, str(default)))
-
-
 def _env_int(name: str, default: int) -> int:
     return int(os.getenv(name, str(default)))
 
@@ -100,19 +96,14 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
 OPENAI_USE_CONTENT = _env_bool("OPENAI_USE_CONTENT", False)
 OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "100"))
-OPENAI_SUMMARY_MAX_TOKENS = int(os.getenv("OPENAI_SUMMARY_MAX_TOKENS", "180"))
-OPENAI_SUMMARY_TEMPERATURE = _env_float("OPENAI_SUMMARY_TEMPERATURE", 0.2)
 ARTICLE_DESCRIPTION_MAX_CHARS = _env_int("ARTICLE_DESCRIPTION_MAX_CHARS", 1200)
 ARTICLE_CONTENT_MAX_CHARS = _env_int("ARTICLE_CONTENT_MAX_CHARS", 4000)
-ENABLE_STRUCTURED_CLASSIFICATION = _env_bool("ENABLE_STRUCTURED_CLASSIFICATION", False)
-ENABLE_PRIORITY_ENGINE = _env_bool("ENABLE_PRIORITY_ENGINE", False)
 ALERT_MIN_PRIORITY = os.getenv("ALERT_MIN_PRIORITY", "media").lower()
 
-MONITOR_INTERVAL_SECONDS = int(os.getenv("MONITOR_INTERVAL_SECONDS", "300"))
-COLLECTOR_INTERVAL_SECONDS = int(os.getenv("COLLECTOR_INTERVAL_SECONDS", str(MONITOR_INTERVAL_SECONDS)))
+# Coleta independente do pipeline. O intervalo do coletor tem default próprio;
+# o antigo MONITOR_INTERVAL_SECONDS ficou só no legado.
+COLLECTOR_INTERVAL_SECONDS = int(os.getenv("COLLECTOR_INTERVAL_SECONDS", "300"))
 ARTICLE_RETENTION_DAYS = int(os.getenv("ARTICLE_RETENTION_DAYS", "1"))
-START_MONITOR_ON_SERVER = _env_bool("DJANGO_START_MONITOR", False)
-START_SCHEDULER_ON_SERVER = _env_bool("DJANGO_START_SCHEDULER", False)
 
 # ---------------------------------------------------------------------------
 # Experimento do TCC
