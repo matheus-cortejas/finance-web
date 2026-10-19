@@ -113,6 +113,17 @@ EMBEDDING_MODELS = _env_list(
     "EMBEDDING_MODELS",
     "paraphrase-multilingual-MiniLM-L12-v2",
 )
+
+# Pasta onde o laboratório guarda modelos locais enviados pela interface.
+# Dentro do container ela é um bind mount gravável do projeto.
+LAB_MODELS_DIR = Path(
+    os.getenv(
+        "LAB_MODELS_DIR",
+        str(PROJECT_ROOT / "core" / "intelligent_motor" / "models"),
+    )
+)
+# Limite do upload de modelo (compactado) em MB.
+LAB_MODEL_UPLOAD_MAX_MB = int(os.getenv("LAB_MODEL_UPLOAD_MAX_MB", "4096"))
 EXPERIMENT_WORKER_POLL_SECONDS = int(os.getenv("WORKER_POLL_SECONDS", "10"))
 EXPERIMENT_BATCH_SIZE = int(os.getenv("EXPERIMENT_BATCH_SIZE", "16"))
 EXPERIMENT_CACHE_ENABLED = _env_bool("EXPERIMENT_CACHE_ENABLED", False)

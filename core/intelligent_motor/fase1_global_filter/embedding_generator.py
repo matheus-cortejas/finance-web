@@ -23,7 +23,7 @@ class EmbeddingGenerator:
     def __init__(self, model_name: str, device: Optional[str] = None):
         self.model_name = model_name
         self.model_key = hashlib.sha256(model_name.encode("utf-8")).hexdigest()[:16]
-        self.device = device or self._default_device()
+        self.device = self.resolve_device(device or self._default_device())
         try:
             from sentence_transformers import SentenceTransformer
 
@@ -42,6 +42,23 @@ class EmbeddingGenerator:
             self.dimension = int(get_dimension())
         except Exception:
             self.dimension = None
+
+    @staticmethod
+    def resolve_device(device: Optional[str] = None) -> str:
+        """Normaliza o device de execução.
+
+        Aceita ``None``, ``auto``, ``cpu``, ``cuda`` ou ``cuda:0``. Em ``auto``
+        escolhe a GPU apenas quando o PyTorch enxerga uma.
+        """
+        value = (device or "").strip().lower()
+        if value in {"", "auto", "default"}:
+            try:
+                import torch
+
+                return "cuda" if torch.cuda.is_available() else "cpu"
+            except Exception:
+                return "cpu"
+        return value
 
     @staticmethod
     def _default_device() -> str:
@@ -95,13 +112,15 @@ class EmbeddingGenerator:
         device: Optional[str] = None,
     ) -> "EmbeddingGenerator":
         resolved = cls.resolve_model_name(model_name=model_name, config=config)
+        effective_device = cls.resolve_device(device or cls._default_device())
+        cache_key = f"{resolved}::{effective_device}"
 
         with cls._lock:
-            existing = cls._instances.get(resolved)
+            existing = cls._instances.get(cache_key)
             if existing is not None:
                 return existing
-            instance = cls(resolved, device=device)
-            cls._instances[resolved] = instance
+            instance = cls(resolved, device=effective_device)
+            cls._instances[cache_key] = instance
             return instance
 
     @classmethod

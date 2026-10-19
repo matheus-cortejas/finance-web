@@ -14,6 +14,9 @@
             </p>
         </div>
         <div class="d-flex gap-2">
+            <a class="btn btn-outline-secondary" href="{% url 'pipeline_lab_models' %}">
+                Gerenciar modelos
+            </a>
             <a class="btn btn-outline-secondary" href="{% url 'pipeline_lab_compare' %}">
                 Comparar execuções
             </a>
@@ -91,6 +94,14 @@
                                 <option value="3" selected>Fase 3 (heurística)</option>
                                 <option value="4">Fase 4 (gate)</option>
                                 <option value="5">Fase 5 (classificação rica)</option>
+                            </select>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small fw-medium" for="run-device">Device</label>
+                            <select class="form-select" id="run-device" name="device">
+                                {% for d in device_choices %}
+                                    <option value="{{ d }}" {% if d == default_device %}selected{% endif %}>{{ d }}</option>
+                                {% endfor %}
                             </select>
                         </div>
                         <div class="col-sm-6">
@@ -193,17 +204,17 @@
         <form method="post">
             {% csrf_token %}
             <div class="row g-3">
-                <div class="col-lg-6">
+                <div class="col-lg-3">
                     <label class="form-label small fw-medium" for="id_titulo">Título *</label>
                     <input type="text" class="form-control" id="id_titulo" name="titulo"
                            value="{{ form_data.titulo|default:'' }}" required>
                 </div>
-                <div class="col-lg-3">
+                <div class="col-lg-4">
                     <label class="form-label small fw-medium" for="id_modelo">Modelo</label>
                     <input class="form-control" id="id_modelo" name="modelo" list="model-options"
                            value="{{ selected_model|default:model_choices.0 }}">
                 </div>
-                <div class="col-lg-3">
+                <div class="col-lg-2">
                     <label class="form-label small fw-medium" for="id_stop">Parar após</label>
                     <select class="form-select" id="id_stop" name="stop_after">
                         <option value="1" {% if selected_stop_after == 1 %}selected{% endif %}>Fase 1</option>
@@ -211,6 +222,14 @@
                         <option value="3" {% if selected_stop_after == 3 %}selected{% endif %}>Fase 3</option>
                         <option value="4" {% if selected_stop_after == 4 %}selected{% endif %}>Fase 4</option>
                         <option value="5" {% if selected_stop_after == 5 or not selected_stop_after %}selected{% endif %}>Fase 5</option>
+                    </select>
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label small fw-medium" for="id_device">Device</label>
+                    <select class="form-select" id="id_device" name="device">
+                        {% for d in device_choices %}
+                            <option value="{{ d }}" {% if d == selected_device or not selected_device and d == default_device %}selected{% endif %}>{{ d }}</option>
+                        {% endfor %}
                     </select>
                 </div>
                 <div class="col-12">

@@ -120,19 +120,25 @@ Exemplos:
 ## Laboratório (`/lab/`)
 
 - Cria uma `ExperimentRun` escolhendo modelo de embeddings, limite, janela de
-  datas, `stop_after` (1–5) e se usa LLM.
+  datas, `stop_after` (1–5), device (`auto`/`cpu`/`cuda`) e se usa LLM.
 - Fases 4 e 5 podem rodar com fallback heurístico quando `usar_llm=0`
   (não exige `OPENAI_API_KEY`).
 - O worker processa as execuções pendentes, retoma execuções interrompidas e
   aceita cancelamento.
 - `/lab/compare/` compara F1, melhor score e melhor similaridade global entre
   execuções. Fases sem labels avaliados aparecem como `—`.
+- `/lab/models/` é o catálogo de modelos: envia `.zip`/`.tar.gz` de modelos
+  locais, registra IDs do Hugging Face, testa o carregamento (e grava a
+  dimensão real), limpa embeddings de ativos e exclui modelos locais.
 
 ## Experimentos do TCC
 
 - O modelo de embeddings é configurável por execução (`ExperimentRun.modelo`).
 - Os embeddings de ativos ficam em `AssetEmbedding`, com namespace por modelo.
 - Modelos locais em `core/intelligent_motor/models/` ou IDs do Hugging Face.
+- A pasta de modelos é gravável pelo container, então o upload do `/lab/`
+  instala direto em `core/intelligent_motor/models/<nome>` no host.
+- Device por execução: `auto` escolhe `cuda` quando o PyTorch enxerga GPU.
 - Sem GPU: `EMBEDDING_DEVICE=cpu` e imagem Docker com PyTorch CPU.
 - Cache de Fase 1 e store de embeddings usam o mesmo namespace de modelo.
 
@@ -141,8 +147,11 @@ Variáveis principais:
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `DATABASE_URL` | — | Se vazia, usa SQLite (`db.sqlite3`). |
-| `EMBEDDING_DEVICE` | `cpu` | `cpu` ou `cuda`. |
-| `EMBEDDING_MODELS` | `paraphrase-multilingual-MiniLM-L12-v2` | Modelos disponíveis na UI. |
+| `EMBEDDING_DEVICE` | `cpu` | `cpu`, `cuda` ou `auto` (default da interface). |
+| `EMBEDDING_MODELS` | `paraphrase-multilingual-MiniLM-L12-v2` | Sugestões iniciais na UI. |
+| `LAB_MODELS_DIR` | `core/intelligent_motor/models` | Pasta dos modelos locais. |
+| `LAB_MODEL_UPLOAD_MAX_MB` | `4096` | Limite do upload de modelo compactado. |
+| `GUNICORN_TIMEOUT` | `600` | Timeout do `web` (uploads/testes grandes). |
 | `COLLECTOR_INTERVAL_SECONDS` | `300` | Intervalo da coleta contínua. |
 | `WORKER_POLL_SECONDS` | `10` | Intervalo de busca por execuções pendentes. |
 | `EXPERIMENT_BATCH_SIZE` | `16` | Tamanho do lote ao iterar notícias. |
@@ -159,11 +168,19 @@ Cada execução do `export_dataset` cria uma pasta com:
 - `manifest.json` — filtros usados, contagens, tamanho e SHA-256 dos arquivos.
 - `annotation_sample.csv` — amostra para anotação manual. Por padrão prioriza
   notícias com conteúdo; use `--sample-all` para amostrar todas.
+- `--only-run` restringe a exportação (e a amostra de anotação) às notícias
+  classificadas por uma execução. É o caminho recomendado para anotar e medir
+  F1 de um run específico.
 
 ```bash
 ./venv/bin/python manage.py export_dataset \
   --output exports --name tcc-v1 \
   --run-id 3 --sample-size 300 --seed 42
+
+# Só as notícias da execução 3, com 100% delas na amostra de anotação
+./venv/bin/python manage.py export_dataset \
+  --output exports --name tcc-run3-anotacao \
+  --run-id 3 --only-run --sample-size 500
 ```
 
 ## Estrutura
@@ -191,9 +208,10 @@ finance-web/
 ## Testes
 
 ```bash
-./venv/bin/python manage.py test core -v 2
+./venv/bin/python manage.py test core pipeline_lab -v 2
 ```
 
-Os testes cobrem normalização/deduplicação da coleta, exportação, criação e
-métricas de execuções, store de embeddings, pipeline sem LLM e a UI do `/lab/`.
-Nenhum teste carrega modelo ou acessa rede.
+Os testes cobrem normalização/deduplicação da coleta, exportação (incluindo
+`--only-run`), criação e métricas de execuções, store de embeddings, pipeline
+sem LLM, catálogo/upload de modelos e a UI do `/lab/`. Nenhum teste carrega
+modelo ou acessa rede.

@@ -13,6 +13,7 @@ def relacionar_tickers(
     carteira_usuario: List[str],
     config: Optional[Dict[str, Any]] = None,
     model_name: Optional[str] = None,
+    device: Optional[str] = None,
 ) -> List[str]:
     """Relaciona tickers por similaridade de embedding.
 
@@ -35,7 +36,7 @@ def relacionar_tickers(
         fase_cfg = config.get("fase2", {})
 
     threshold = float(fase_cfg.get("threshold_similaridade", 0.70))
-    store = get_asset_embedding_store(model_name=model_name)
+    store = get_asset_embedding_store(model_name=model_name, device=device)
 
     related: list[tuple[str, float]] = []
     start = time.time()

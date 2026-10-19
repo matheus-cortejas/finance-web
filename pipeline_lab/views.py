@@ -8,13 +8,23 @@ from datetime import datetime
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, user_passes_test
+from django.core.exceptions import ValidationError
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
 
 from core.models import Ativo, Noticia
-from pipeline_lab.models import ExperimentRun, NewsLabel
+from pipeline_lab.models import AssetEmbedding, ExperimentRun, LabModel, NewsLabel
 from pipeline_lab.services.experiments import create_run
+from pipeline_lab.services.model_registry import (
+    clear_asset_embeddings,
+    delete_local_model,
+    install_archive,
+    local_model_exists,
+    register_huggingface,
+    scan_local_models,
+    test_model_load,
+)
 
 logger = logging.getLogger("pipeline_lab")
 
@@ -23,8 +33,15 @@ def _is_staff(user):
     return user.is_authenticated and user.is_staff
 
 
+def _device_choices() -> list[str]:
+    return ["auto", "cpu", "cuda"]
+
+
 def _model_choices() -> list[str]:
     choices = list(getattr(settings, "EMBEDDING_MODELS", []) or [])
+    for nome in LabModel.objects.filter(ativo=True).values_list("nome", flat=True):
+        if nome and nome not in choices:
+            choices.append(nome)
     for modelo in ExperimentRun.objects.values_list("modelo", flat=True).distinct():
         if modelo and modelo not in choices:
             choices.append(modelo)
@@ -37,6 +54,7 @@ def _run_pipeline_test(
     model_name: str,
     stop_after: int,
     usar_llm: bool,
+    device: str | None = None,
 ) -> dict:
     from core.intelligent_motor.pipeline_orchestrator import (
         processar_noticia_completa,
@@ -49,6 +67,7 @@ def _run_pipeline_test(
         stop_after=stop_after,
         usar_llm=usar_llm,
         cache_enabled=False,
+        device=device,
     )
 
 
@@ -141,6 +160,8 @@ def pipeline_lab_home(request):
         "model_choices": _model_choices() or [
             "paraphrase-multilingual-MiniLM-L12-v2"
         ],
+        "device_choices": _device_choices(),
+        "default_device": getattr(settings, "EMBEDDING_DEVICE", "cpu"),
         "runs": ExperimentRun.objects.select_related("criado_por")[:20],
         "total_noticias": Noticia.objects.count(),
         "noticias_com_conteudo": Noticia.objects.exclude(conteudo__isnull=True)
@@ -148,6 +169,7 @@ def pipeline_lab_home(request):
         .count(),
         "total_labels": NewsLabel.objects.exclude(relevancia=None).count(),
         "total_runs": ExperimentRun.objects.count(),
+        "total_modelos": LabModel.objects.count(),
     }
 
     if request.method == "POST":
@@ -156,6 +178,7 @@ def pipeline_lab_home(request):
         conteudo = request.POST.get("conteudo", "").strip()
         link = request.POST.get("link", "").strip() or "https://test.example.com/news"
         modelo = request.POST.get("modelo", "").strip() or context["model_choices"][0]
+        device = request.POST.get("device", "").strip() or context["default_device"]
         try:
             stop_after = max(1, min(int(request.POST.get("stop_after", 5)), 5))
         except ValueError:
@@ -183,6 +206,7 @@ def pipeline_lab_home(request):
                 model_name=modelo,
                 stop_after=stop_after,
                 usar_llm=usar_llm,
+                device=device,
             )
         except Exception as exc:
             logger.exception("Erro no pipeline de teste")
@@ -205,6 +229,7 @@ def pipeline_lab_home(request):
                 "t_pipeline": t_pipeline,
                 "t_alertas": t_alertas,
                 "selected_model": modelo,
+                "selected_device": device,
                 "selected_stop_after": stop_after,
                 "selected_usar_llm": usar_llm,
             }
@@ -234,6 +259,7 @@ def create_run_view(request):
             stop_after=stop_after,
             usar_llm=request.POST.get("usar_llm") == "on",
             cache_enabled=request.POST.get("cache_enabled") == "on",
+            device=request.POST.get("device") or None,
         )
     except (ValueError, TypeError) as exc:
         messages.error(request, str(exc))
@@ -320,3 +346,152 @@ def compare_runs(request):
             }
         )
     return render(request, "pipeline_lab/compare.html", {"rows": rows})
+
+
+# --------------------------------------------------------------------- modelos
+
+
+def _decorate_models(models: list[LabModel]) -> list[LabModel]:
+    from collections import Counter
+
+    try:
+        from core.intelligent_motor.fase1_global_filter.embedding_generator import (
+            EmbeddingGenerator,
+        )
+    except Exception:  # pragma: no cover - ambiente sem sentence-transformers
+        EmbeddingGenerator = None
+
+    alvos_por_modelo: dict[int, set[str]] = {}
+    for model in models:
+        alvos = {model.nome}
+        if EmbeddingGenerator is not None:
+            try:
+                alvos.add(EmbeddingGenerator.resolve_model_name(model.nome))
+            except Exception:
+                pass
+        alvos_por_modelo[model.id] = alvos
+
+    todos = set().union(*alvos_por_modelo.values()) if alvos_por_modelo else set()
+    embeddings = Counter(
+        AssetEmbedding.objects.filter(modelo__in=list(todos)).values_list(
+            "modelo", flat=True
+        )
+    )
+    runs = Counter(ExperimentRun.objects.values_list("modelo", flat=True))
+
+    for model in models:
+        model.alvos = alvos_por_modelo.get(model.id, set())
+        model.total_embeddings = sum(embeddings[alvo] for alvo in model.alvos)
+        model.total_runs = runs.get(model.nome, 0)
+        model.existe = local_model_exists(model) if model.e_local else True
+    return models
+
+
+@login_required
+@user_passes_test(_is_staff)
+def models_view(request):
+    if request.method == "POST":
+        acao = request.POST.get("acao", "")
+        try:
+            if acao == "upload":
+                model = install_archive(
+                    request.FILES.get("arquivo"),
+                    nome=request.POST.get("nome", ""),
+                    descricao=request.POST.get("descricao", ""),
+                    user=request.user,
+                    sobrescrever=request.POST.get("sobrescrever") == "on",
+                )
+                messages.success(
+                    request,
+                    f"Modelo '{model.nome}' instalado. Use 'Testar' para validar.",
+                )
+            elif acao == "registrar_hf":
+                model = register_huggingface(
+                    request.POST.get("nome", ""),
+                    descricao=request.POST.get("descricao", ""),
+                    user=request.user,
+                )
+                messages.success(
+                    request,
+                    f"Modelo Hugging Face '{model.nome}' registrado.",
+                )
+            elif acao == "scan":
+                criados = scan_local_models(user=request.user)
+                messages.success(
+                    request,
+                    f"Varredura concluída: {criados} modelo(s) novo(s) registrado(s).",
+                )
+            else:
+                messages.warning(request, "Ação desconhecida.")
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages) if exc.messages else str(exc))
+        except Exception as exc:  # noqa: BLE001 - reportado na tela
+            logger.exception("Falha na gestão de modelos")
+            messages.error(request, f"Falha: {exc}")
+        return redirect("pipeline_lab_models")
+
+    models = _decorate_models(list(LabModel.objects.all()))
+    return render(
+        request,
+        "pipeline_lab/models.html",
+        {
+            "models": models,
+            "device_choices": _device_choices(),
+            "default_device": getattr(settings, "EMBEDDING_DEVICE", "cpu"),
+            "models_dir": str(getattr(settings, "LAB_MODELS_DIR", "")),
+            "upload_max_mb": getattr(settings, "LAB_MODEL_UPLOAD_MAX_MB", 4096),
+        },
+    )
+
+
+@login_required
+@user_passes_test(_is_staff)
+@require_POST
+def model_test(request, model_id: int):
+    model = get_object_or_404(LabModel, pk=model_id)
+    device = request.POST.get("device") or None
+    test_model_load(model, device=device)
+    if model.erro_teste:
+        messages.error(request, f"'{model.nome}' falhou: {model.erro_teste[:500]}")
+    else:
+        messages.success(
+            request,
+            f"'{model.nome}' carregou com {model.dimensao or '?'} dimensões.",
+        )
+    return redirect("pipeline_lab_models")
+
+
+@login_required
+@user_passes_test(_is_staff)
+@require_POST
+def model_clear_embeddings(request, model_id: int):
+    model = get_object_or_404(LabModel, pk=model_id)
+    total = clear_asset_embeddings(model)
+    messages.success(request, f"{total} embedding(s) removido(s) para '{model.nome}'.")
+    return redirect("pipeline_lab_models")
+
+
+@login_required
+@user_passes_test(_is_staff)
+@require_POST
+def model_toggle(request, model_id: int):
+    model = get_object_or_404(LabModel, pk=model_id)
+    model.ativo = not model.ativo
+    model.save(update_fields=["ativo", "atualizado_em"])
+    estado = "ativado" if model.ativo else "desativado"
+    messages.success(request, f"Modelo '{model.nome}' {estado}.")
+    return redirect("pipeline_lab_models")
+
+
+@login_required
+@user_passes_test(_is_staff)
+@require_POST
+def model_delete(request, model_id: int):
+    model = get_object_or_404(LabModel, pk=model_id)
+    nome = model.nome
+    try:
+        delete_local_model(model)
+        messages.success(request, f"Modelo '{nome}' excluído.")
+    except ValidationError as exc:
+        messages.error(request, "; ".join(exc.messages) if exc.messages else str(exc))
+    return redirect("pipeline_lab_models")

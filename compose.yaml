@@ -19,13 +19,14 @@ x-app: &app
     HF_HOME: /app/data/hf
     FASE1_SQLITE_PATH: /app/data/cache/fase1.sqlite
     PIPELINE_METRICS_PATH: /app/data/metrics/pipeline_metrics.jsonl
+    LAB_MODEL_UPLOAD_MAX_MB: ${LAB_MODEL_UPLOAD_MAX_MB:-4096}
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
   volumes:
     - app_logs:/app/logs
     - app_data:/app/data
     - hf_cache:/app/data/hf
     - ./exports:/app/exports
-    - ./core/intelligent_motor/models:/app/core/intelligent_motor/models:ro
+    - ./core/intelligent_motor/models:/app/core/intelligent_motor/models
     - ./rss.txt:/app/rss.txt:ro
     - ./core_ativos.json:/app/core_ativos.json:ro
   restart: unless-stopped
@@ -102,7 +103,7 @@ services:
       - --workers
       - ${GUNICORN_WORKERS:-2}
       - --timeout
-      - "180"
+      - ${GUNICORN_TIMEOUT:-600}
       - --access-logfile
       - "-"
       - --error-logfile

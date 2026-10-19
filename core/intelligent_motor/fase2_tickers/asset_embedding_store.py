@@ -26,9 +26,13 @@ class AssetEmbeddingStore:
         mapping_path: Optional[str] = None,
         db_path: Optional[str] = None,
         model_name: Optional[str] = None,
+        device: Optional[str] = None,
     ):
         self._root = Path(__file__).parent
         self.model_name = EmbeddingGenerator.resolve_model_name(model_name=model_name)
+        self.device = (
+            EmbeddingGenerator.resolve_device(device) if device else None
+        )
         self.model_key = hashlib.sha256(
             self.model_name.encode("utf-8")
         ).hexdigest()[:16]
@@ -279,7 +283,10 @@ class AssetEmbeddingStore:
         if not missing:
             return 0
 
-        generator = EmbeddingGenerator.instance(model_name=self.model_name)
+        generator = EmbeddingGenerator.instance(
+            model_name=self.model_name,
+            device=self.device,
+        )
         saved = 0
         for start in range(0, len(missing), batch_size):
             chunk = missing[start : start + batch_size]
@@ -331,13 +338,16 @@ _STORES_LOCK = threading.Lock()
 
 def get_asset_embedding_store(
     model_name: Optional[str] = None,
+    device: Optional[str] = None,
 ) -> AssetEmbeddingStore:
     resolved = EmbeddingGenerator.resolve_model_name(model_name=model_name)
+    effective_device = EmbeddingGenerator.resolve_device(device) if device else ""
+    cache_key = f"{resolved}::{effective_device}"
     with _STORES_LOCK:
-        store = _STORES.get(resolved)
+        store = _STORES.get(cache_key)
         if store is None:
-            store = AssetEmbeddingStore(model_name=resolved)
-            _STORES[resolved] = store
+            store = AssetEmbeddingStore(model_name=resolved, device=device)
+            _STORES[cache_key] = store
         return store
 
 

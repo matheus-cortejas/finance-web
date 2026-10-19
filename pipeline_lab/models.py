@@ -151,3 +151,46 @@ class NewsLabel(models.Model):
 
     def __str__(self) -> str:
         return f"Label notícia {self.noticia_id}"
+
+
+class LabModel(models.Model):
+    """Catálogo de modelos de embeddings disponíveis no laboratório."""
+
+    ORIGEM_UPLOAD = "upload"
+    ORIGEM_LOCAL = "local"
+    ORIGEM_HUGGINGFACE = "huggingface"
+    ORIGEM_CHOICES = [
+        (ORIGEM_UPLOAD, "Enviado pela interface"),
+        (ORIGEM_LOCAL, "Pasta local do projeto"),
+        (ORIGEM_HUGGINGFACE, "Hugging Face"),
+    ]
+
+    # Valor usado como `modelo` nas execuções: nome da pasta local ou ID do HF.
+    nome = models.CharField(max_length=255, unique=True)
+    origem = models.CharField(
+        max_length=16, choices=ORIGEM_CHOICES, default=ORIGEM_LOCAL
+    )
+    descricao = models.TextField(blank=True, default="")
+    dimensao = models.PositiveIntegerField(null=True, blank=True)
+    ativo = models.BooleanField(default=True)
+    erro_teste = models.TextField(blank=True, default="")
+    testado_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    atualizado_em = models.DateTimeField(auto_now=True)
+    criado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lab_models",
+    )
+
+    class Meta:
+        ordering = ["nome"]
+
+    def __str__(self) -> str:
+        return self.nome
+
+    @property
+    def e_local(self) -> bool:
+        return self.origem in {self.ORIGEM_UPLOAD, self.ORIGEM_LOCAL}

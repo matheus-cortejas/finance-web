@@ -78,6 +78,10 @@
                 <strong>{{ config.limite|default:"todas" }}</strong>
             </div>
             <div class="col-sm-6 col-lg-3">
+                <span class="text-muted">Device:</span>
+                <strong>{{ config.device|default:"—" }}</strong>
+            </div>
+            <div class="col-sm-6 col-lg-3">
                 <span class="text-muted">Cache:</span>
                 <strong>{% if config.cache_enabled %}sim{% else %}não{% endif %}</strong>
             </div>
@@ -224,8 +228,8 @@
             <p class="text-muted mb-0">Nenhuma notícia processada ainda.</p>
         {% endif %}
         <p class="small text-muted mt-3 mb-0">
-            Exportar com anotações e resultado desta execução:
-            <code>python manage.py export_dataset --run-id {{ run.id }}</code>
+            Exportar só as notícias desta execução, para anotação:
+            <code>python manage.py export_dataset --run-id {{ run.id }} --only-run --sample-size 100</code>
         </p>
     </div>
 </div>

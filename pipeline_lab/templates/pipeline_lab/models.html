@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+
+{% block title %}Modelos | Pipeline Lab{% endblock %}
+
+{% block body %}
+<div class="fade-in">
+    <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+        <div>
+            <a class="small text-decoration-none" href="{% url 'pipeline_lab_home' %}">← Pipeline Lab</a>
+            <h1 class="h2 fw-bold hero-title mb-0 mt-2">Modelos de embeddings</h1>
+            <p class="hero-subtitle mb-0">
+                Envie modelos locais, registre IDs do Hugging Face e valide o
+                carregamento antes de rodar um experimento.
+            </p>
+        </div>
+    </div>
+
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags|default:'info' }}" role="alert">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+            <div class="glass surface p-4 h-100">
+                <h2 class="h5 fw-bold mb-3">Enviar modelo local (.zip)</h2>
+                <form method="post" enctype="multipart/form-data">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="upload">
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="upload-arquivo">Arquivo compactado *</label>
+                        <input class="form-control" type="file" id="upload-arquivo"
+                               name="arquivo" accept=".zip,.tar.gz,.tgz" required>
+                        <div class="form-text">
+                            O conteúdo deve ser uma pasta de modelo do
+                            sentence-transformers (com <code>config.json</code>,
+                            <code>modules.json</code> ou <code>model.safetensors</code>).
+                            Limite atual: {{ upload_max_mb }} MB.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="upload-nome">Nome (opcional)</label>
+                        <input class="form-control" id="upload-nome" name="nome"
+                               placeholder="ex.: meu-minilm-pt" maxlength="120">
+                        <div class="form-text">
+                            Se ficar vazio, usa o nome do arquivo. É este nome que
+                            você digita na criação da execução.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="upload-descricao">Descrição</label>
+                        <textarea class="form-control" id="upload-descricao" name="descricao" rows="2"></textarea>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" id="upload-sobrescrever" name="sobrescrever">
+                        <label class="form-check-label small" for="upload-sobrescrever">
+                            Sobrescrever se já existir (apaga embeddings antigos)
+                        </label>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Enviar e instalar</button>
+                </form>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="glass surface p-4 h-100">
+                <h2 class="h5 fw-bold mb-3">Registrar modelo do Hugging Face</h2>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="registrar_hf">
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="hf-nome">ID do modelo *</label>
+                        <input class="form-control" id="hf-nome" name="nome"
+                               placeholder="ex.: BAAI/bge-m3" required>
+                        <div class="form-text">
+                            O download acontece no primeiro uso, pelo <code>worker</code>.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-medium" for="hf-descricao">Descrição</label>
+                        <textarea class="form-control" id="hf-descricao" name="descricao" rows="2"></textarea>
+                    </div>
+                    <button class="btn btn-primary" type="submit">Registrar</button>
+                </form>
+
+                <hr class="my-4">
+
+                <h3 class="h6 fw-bold mb-2">Pastas que já estão no disco</h3>
+                <p class="text-muted small mb-3">
+                    A pasta de modelos é <code>{{ models_dir }}</code>. Use a
+                    varredura para registrar modelos copiados manualmente.
+                </p>
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="acao" value="scan">
+                    <button class="btn btn-outline-secondary" type="submit">Varrer pasta de modelos</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="glass surface p-4">
+        <h2 class="h5 fw-bold mb-3">Catálogo</h2>
+        {% if models %}
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>Modelo</th>
+                            <th>Origem</th>
+                            <th>Dimensão</th>
+                            <th>Embeddings</th>
+                            <th>Runs</th>
+                            <th>Status</th>
+                            <th style="min-width: 320px;">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for model in models %}
+                            <tr>
+                                <td>
+                                    <div class="fw-medium">{{ model.nome }}</div>
+                                    {% if model.descricao %}
+                                        <div class="text-muted small">{{ model.descricao|truncatechars:80 }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge text-bg-light border">{{ model.get_origem_display }}</span>
+                                    {% if model.e_local and not model.existe %}
+                                        <div class="small text-danger mt-1">pasta ausente</div>
+                                    {% endif %}
+                                </td>
+                                <td>{{ model.dimensao|default:"—" }}</td>
+                                <td>{{ model.total_embeddings }}</td>
+                                <td>{{ model.total_runs }}</td>
+                                <td>
+                                    {% if model.erro_teste %}
+                                        <span class="badge text-bg-danger">falhou</span>
+                                        <div class="small text-danger mt-1">{{ model.erro_teste|truncatechars:90 }}</div>
+                                    {% elif model.testado_em %}
+                                        <span class="badge text-bg-success">ok</span>
+                                        <div class="small text-muted mt-1">{{ model.testado_em|date:"d/m/Y H:i" }}</div>
+                                    {% else %}
+                                        <span class="badge text-bg-warning">não testado</span>
+                                    {% endif %}
+                                    {% if not model.ativo %}
+                                        <div class="small text-muted mt-1">inativo</div>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <form method="post" action="{% url 'pipeline_lab_model_test' model.id %}"
+                                          class="d-flex gap-2 mb-2">
+                                        {% csrf_token %}
+                                        <select class="form-select form-select-sm" name="device"
+                                                style="max-width: 110px;">
+                                            {% for d in device_choices %}
+                                                <option value="{{ d }}" {% if d == default_device %}selected{% endif %}>{{ d }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        <button class="btn btn-sm btn-outline-primary" type="submit">Testar</button>
+                                    </form>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        <form method="post"
+                                              action="{% url 'pipeline_lab_model_clear_embeddings' model.id %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-sm btn-outline-secondary" type="submit">
+                                                Limpar embeddings
+                                            </button>
+                                        </form>
+                                        <form method="post"
+                                              action="{% url 'pipeline_lab_model_toggle' model.id %}">
+                                            {% csrf_token %}
+                                            <button class="btn btn-sm btn-outline-secondary" type="submit">
+                                                {% if model.ativo %}Desativar{% else %}Ativar{% endif %}
+                                            </button>
+                                        </form>
+                                        {% if model.e_local %}
+                                            <form method="post"
+                                                  action="{% url 'pipeline_lab_model_delete' model.id %}"
+                                                  onsubmit="return confirm('Excluir {{ model.nome }} e seus embeddings de ativos?');">
+                                                {% csrf_token %}
+                                                <button class="btn btn-sm btn-outline-danger" type="submit">Excluir</button>
+                                            </form>
+                                        {% endif %}
+                                    </div>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-muted mb-0">
+                Nenhum modelo no catálogo. Envie um .zip, registre um ID do
+                Hugging Face ou rode a varredura.
+            </p>
+        {% endif %}
+    </div>
+
+    <p class="small text-muted mt-3 mb-0">
+        Dica: depois de testar, o nome do modelo aparece automaticamente nas
+        sugestões da criação de execução. Para usar no worker, o modelo precisa
+        estar acessível dentro do container.
+    </p>
+</div>
+{% endblock %}

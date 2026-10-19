@@ -61,6 +61,7 @@ def create_run(
     stop_after: int = 3,
     usar_llm: bool = False,
     cache_enabled: bool | None = None,
+    device: str | None = None,
 ) -> ExperimentRun:
     modelo = (modelo or "").strip()
     if not modelo:
@@ -80,7 +81,8 @@ def create_run(
             if cache_enabled is None
             else bool(cache_enabled)
         ),
-        "device": getattr(settings, "EMBEDDING_DEVICE", "cpu"),
+        "device": (device or "").strip()
+        or getattr(settings, "EMBEDDING_DEVICE", "cpu"),
     }
 
     qs = build_noticias_queryset(config)
@@ -163,6 +165,9 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
         config.get("cache_enabled", getattr(settings, "EXPERIMENT_CACHE_ENABLED", False))
     )
     batch_size = max(1, int(getattr(settings, "EXPERIMENT_BATCH_SIZE", 16)))
+    device = (config.get("device") or "").strip() or getattr(
+        settings, "EMBEDDING_DEVICE", "cpu"
+    )
 
     base_qs = build_noticias_queryset(config, apply_limit=False)
     already_ids = list(
@@ -215,7 +220,7 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
 
     generator = EmbeddingGenerator.instance(
         model_name=run.modelo,
-        device=getattr(settings, "EMBEDDING_DEVICE", "cpu"),
+        device=device,
     )
     run.embedding_dim = generator.dimension
     run.save(update_fields=["embedding_dim"])
@@ -226,7 +231,7 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
             get_asset_embedding_store,
         )
 
-        store = get_asset_embedding_store(model_name=run.modelo)
+        store = get_asset_embedding_store(model_name=run.modelo, device=device)
         gerados = store.generate_and_persist_all()
         if gerados:
             logger.info(
@@ -306,6 +311,7 @@ def _execute_run(run: ExperimentRun, should_stop=None) -> None:
                 stop_after=stop_after,
                 usar_llm=usar_llm,
                 cache_enabled=cache_enabled,
+                device=device,
             )
             elapsed = (django_timezone.now() - started).total_seconds()
             defaults = _classification_defaults(result or {}, elapsed)

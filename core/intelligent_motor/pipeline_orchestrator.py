@@ -23,12 +23,13 @@ def _ensure_initialized(
     config: Dict[str, Any],
     model_name: Optional[str],
     cache_enabled: bool,
+    device: Optional[str] = None,
 ) -> None:
     """Inicializa o cache (se habilitado) e o modelo de embeddings solicitado."""
     with _init_lock:
         if cache_enabled:
             get_cache_manager(config=config)
-        EmbeddingGenerator.instance(model_name=model_name, config=config)
+        EmbeddingGenerator.instance(model_name=model_name, config=config, device=device)
 
 
 def _registrar_fim(
@@ -50,6 +51,7 @@ def processar_noticia_completa(
     stop_after: int = 5,
     usar_llm: bool = True,
     cache_enabled: Optional[bool] = None,
+    device: Optional[str] = None,
 ) -> dict:
     """Executa o pipeline com modelo e ponto de parada configuráveis.
 
@@ -61,6 +63,7 @@ def processar_noticia_completa(
         stop_after: 1..5; para após a fase indicada
         usar_llm: se False, Fases 4/5 usam apenas regras/fallback
         cache_enabled: sobrescreve a configuração de cache (experimentos)
+        device: 'cpu', 'cuda', 'auto' ou None (usa o default das settings)
     """
     stop_after = max(1, min(int(stop_after), 5))
     config = copy.deepcopy(load_global_config())
@@ -80,7 +83,7 @@ def processar_noticia_completa(
     effective_cache = bool(
         config.get("fase1", {}).get("cache", {}).get("enabled", True)
     )
-    _ensure_initialized(config, effective_model, effective_cache)
+    _ensure_initialized(config, effective_model, effective_cache, device=device)
 
     t_inicio = time.perf_counter()
     metrica: Dict[str, Any] = {
@@ -90,6 +93,7 @@ def processar_noticia_completa(
         "publicado_em": noticia.get("publicado_em"),
         "run_id": run_id,
         "modelo": effective_model,
+        "device": EmbeddingGenerator.resolve_device(device),
         "stop_after": stop_after,
         "usar_llm": bool(usar_llm),
         "n_tickers_carteira": len(carteira_usuario or []),
@@ -125,6 +129,7 @@ def processar_noticia_completa(
         carteira_usuario,
         config=config,
         model_name=effective_model,
+        device=device,
     )
     metrica["fase2_tempo_s"] = round(time.perf_counter() - t0, 4)
 
