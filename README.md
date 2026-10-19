@@ -118,7 +118,7 @@ Exemplos:
 ./venv/bin/python manage.py seed_setores --export exports/setores_ativos.json
 ./venv/bin/python manage.py export_dataset --output exports --sample-size 300 --run-id 3
 ./venv/bin/python manage.py build_annotation_sample --run-id 3 --output exports/anotacao
-./venv/bin/python manage.py import_labels --csv exports/anotacao/anotacao/anotacao.csv
+./venv/bin/python manage.py import_labels exports/anotacao/anotacao/anotacao.csv
 ./venv/bin/python manage.py compute_metrics --run-id 3
 ```
 
@@ -134,12 +134,15 @@ como `noticia_id` — para servir a qualquer execução futura sem retrabalho.
 
 # 2) anote anotacao.csv (as listas de setor/categoria/etc. ficam em LEIA-ME.txt)
 # 3) importe
-./venv/bin/python manage.py import_labels --csv exports/anotacao/anotacao/anotacao.csv --dry-run
-./venv/bin/python manage.py import_labels --csv exports/anotacao/anotacao/anotacao.csv
+./venv/bin/python manage.py import_labels exports/anotacao/anotacao/anotacao.csv --dry-run
+./venv/bin/python manage.py import_labels exports/anotacao/anotacao/anotacao.csv
 
 # 4) recalcule as métricas das fases
 ./venv/bin/python manage.py compute_metrics --run-id 3
 ```
+
+> O passo a passo completo (setorização, run base, anotação, variantes A0–A4 e
+> leitura das métricas) está em [`docs/GUIA_TCC.md`](docs/GUIA_TCC.md).
 
 Colunas de `anotacao.csv` (vazias = não anotado; não entram na métrica):
 
