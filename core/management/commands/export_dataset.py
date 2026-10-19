@@ -132,6 +132,14 @@ class Command(BaseCommand):
             help="Inclui no JSONL o resultado de uma execução do laboratório.",
         )
         parser.add_argument(
+            "--only-run",
+            action="store_true",
+            help=(
+                "Exporta apenas as notícias classificadas pela execução "
+                "indicada (exige --run-id)."
+            ),
+        )
+        parser.add_argument(
             "--sample-size",
             type=int,
             default=300,
@@ -165,8 +173,6 @@ class Command(BaseCommand):
             qs = qs.filter(publicado_em__lte=self._parse_dt(options["until"]))
         if options["only_with_content"]:
             qs = qs.exclude(conteudo__isnull=True).exclude(conteudo="")
-        if options["limit"]:
-            qs = qs[: options["limit"]]
 
         run = None
         if options["run_id"]:
@@ -174,6 +180,16 @@ class Command(BaseCommand):
                 run = ExperimentRun.objects.get(pk=options["run_id"])
             except ExperimentRun.DoesNotExist as exc:
                 raise CommandError(f"Execução {options['run_id']} não encontrada.") from exc
+
+        if options["only_run"]:
+            if run is None:
+                raise CommandError("--only-run exige --run-id.")
+            qs = qs.filter(run_classifications__run=run).distinct()
+
+        if options["limit"]:
+            qs = qs[: options["limit"]]
+
+        if run is not None:
             qs = qs.prefetch_related(
                 Prefetch(
                     "run_classifications",
@@ -331,6 +347,7 @@ class Command(BaseCommand):
                 "until": options["until"],
                 "only_with_content": options["only_with_content"],
                 "run_id": options["run_id"],
+                "only_run": options["only_run"],
                 "sample_size": options["sample_size"],
                 "sample_all": options["sample_all"],
                 "seed": options["seed"],
