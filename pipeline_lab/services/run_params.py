@@ -6,6 +6,7 @@ from typing import Any
 from django.core.exceptions import ValidationError
 
 from core.intelligent_motor.config_loader import load_global_config
+from core.intelligent_motor.fase2_tickers.gating import ESTRATEGIAS as ESTRATEGIAS_FASE2
 
 
 # Pesos da Fase 3, na ordem em que aparecem no config.yaml.
@@ -27,6 +28,19 @@ PESO_MIN = -20
 PESO_MAX = 20
 THRESHOLD_MIN = 0.0
 THRESHOLD_MAX = 1.0
+TOP_K_MIN = 1
+TOP_K_MAX = 100
+
+
+def _coerce_top_k(value) -> int | None:
+    """Converte ``top_k`` para inteiro positivo; vazio/None = sem limite."""
+    if value in (None, "", "null", "none", "None"):
+        return None
+    try:
+        ivalue = int(value)
+    except (TypeError, ValueError):
+        return None
+    return ivalue if ivalue >= TOP_K_MIN else None
 
 
 def _deep_merge(base: dict, extra: dict | None) -> dict:
@@ -62,6 +76,11 @@ def defaults() -> dict:
             "threshold_similaridade": float(
                 fase2.get("threshold_similaridade", 0.70)
             ),
+            "estrategia": str(
+                fase2.get("estrategia", "similaridade") or "similaridade"
+            ),
+            "top_k": _coerce_top_k(fase2.get("top_k")),
+            "peso_lexical": float(fase2.get("peso_lexical", 0.0) or 0.0),
         },
         "fase3": {
             "pesos": {chave: int(pesos.get(chave, 0)) for chave, _ in PESOS_FASE3}
@@ -172,15 +191,38 @@ def build_overrides(post) -> dict:
     if fase1:
         overrides["fase1"] = fase1
 
+    fase2: dict[str, Any] = {}
     threshold_similaridade = _parse_float(
         post,
         "fase2_threshold",
         base["fase2"]["threshold_similaridade"],
     )
     if abs(threshold_similaridade - base["fase2"]["threshold_similaridade"]) > 1e-12:
-        overrides["fase2"] = {
-            "threshold_similaridade": threshold_similaridade
-        }
+        fase2["threshold_similaridade"] = threshold_similaridade
+
+    estrategia = (post.get("fase2_estrategia") or "").strip() or base["fase2"][
+        "estrategia"
+    ]
+    if estrategia != base["fase2"]["estrategia"]:
+        fase2["estrategia"] = estrategia
+
+    if "fase2_top_k" in post:
+        top_k = _coerce_top_k((post.get("fase2_top_k") or "").strip())
+        if top_k != base["fase2"]["top_k"]:
+            fase2["top_k"] = top_k
+
+    peso_lexical = _parse_float(
+        post,
+        "fase2_peso_lexical",
+        base["fase2"]["peso_lexical"],
+        low=0.0,
+        high=1.0,
+    )
+    if abs(peso_lexical - base["fase2"]["peso_lexical"]) > 1e-12:
+        fase2["peso_lexical"] = peso_lexical
+
+    if fase2:
+        overrides["fase2"] = fase2
 
     pesos: dict[str, int] = {}
     for chave, _ in PESOS_FASE3:
@@ -274,6 +316,22 @@ def validate_overrides(overrides: dict | None) -> None:
 
     if not fase1["centroides_referencia"]:
         raise ValidationError("Fase 1: informe ao menos um centroide.")
+
+    if fase2.get("estrategia") not in ESTRATEGIAS_FASE2:
+        raise ValidationError(
+            "Fase 2: estratégia deve ser uma de "
+            + ", ".join(ESTRATEGIAS_FASE2)
+            + "."
+        )
+    top_k = fase2.get("top_k")
+    if top_k is not None and not (TOP_K_MIN <= int(top_k) <= TOP_K_MAX):
+        raise ValidationError(
+            f"Fase 2: top_k deve estar entre {TOP_K_MIN} e {TOP_K_MAX} "
+            "(ou vazio para sem limite)."
+        )
+    peso_lexical = float(fase2.get("peso_lexical", 0.0) or 0.0)
+    if not (0.0 <= peso_lexical <= 1.0):
+        raise ValidationError("Fase 2: peso_lexical deve estar entre 0 e 1.")
 
     if fase4["score_rejeicao_direta"] >= faixa["minimo"]:
         raise ValidationError(

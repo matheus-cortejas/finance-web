@@ -39,14 +39,16 @@ class Command(BaseCommand):
                 continue
 
             fase1 = metrics["fase1"]["metricas"]
+            fase2 = metrics["fase2"]["metricas"]
             fase4 = metrics["fase4"]["metricas"]
             fase1_f1 = fase1["f1"] if fase1.get("total") else "-"
+            fase2_f1 = fase2["f1"] if fase2.get("itens") else "-"
             fase4_f1 = fase4["f1"] if fase4.get("total") else "-"
             best_score = metrics["score_heuristico"].get("best") or {}
             best_global = metrics["relevancia_global"].get("best") or {}
             self.stdout.write(
                 f"run={run.id} modelo={run.modelo} labeled={metrics['labeled_total']} "
-                f"fase1_f1={fase1_f1} fase4_f1={fase4_f1} "
+                f"fase1_f1={fase1_f1} fase2_f1={fase2_f1} fase4_f1={fase4_f1} "
                 f"score_best_f1={best_score.get('f1', '-')} "
                 f"global_best_f1={best_global.get('f1', '-')}"
             )

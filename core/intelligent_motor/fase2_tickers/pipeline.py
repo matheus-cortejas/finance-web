@@ -4,6 +4,13 @@ import time
 from typing import Any, Dict, List, Optional
 
 from .asset_embedding_store import get_asset_embedding_store
+from .gating import (
+    ESTRATEGIA_SETOR_LEXICAL,
+    ESTRATEGIA_SIMILARIDADE,
+    aplicar_estrategia,
+    setores_por_ticker,
+    tickers_lexicais,
+)
 from .similarity import cosine_similarity
 from ..fase1_global_filter.logging import log_event
 
@@ -14,11 +21,20 @@ def relacionar_tickers(
     config: Optional[Dict[str, Any]] = None,
     model_name: Optional[str] = None,
     device: Optional[str] = None,
+    setores_ativos: Optional[Dict[str, str]] = None,
 ) -> List[str]:
     """Relaciona tickers por similaridade de embedding.
 
     Usa multiplicação matricial (numpy) quando possível; para 586 ativos e
     16k notícias isso é ordens de magnitude mais rápido que o loop Python.
+
+    A estratégia é lida de ``config['fase2']`` (ver ``gating.py``):
+
+    * ``estrategia`` (padrão ``similaridade``): ``similaridade`` (A0),
+      ``similaridade_setor`` (A1) ou ``similaridade_setor_lexical`` (A2).
+    * ``top_k`` (padrão ``None``): limita o número de tickers retornados.
+    * ``peso_lexical`` (padrão ``0``): bônus de ordenação para tickers citados
+      explicitamente no texto (usado em A2).
     """
     if not isinstance(carteira_usuario, (list, tuple)):
         raise ValueError("carteira_usuario deve ser uma lista de tickers")
@@ -36,12 +52,31 @@ def relacionar_tickers(
         fase_cfg = config.get("fase2", {})
 
     threshold = float(fase_cfg.get("threshold_similaridade", 0.70))
+    estrategia = str(fase_cfg.get("estrategia", ESTRATEGIA_SIMILARIDADE))
+    top_k = fase_cfg.get("top_k")
+    peso_lexical = float(fase_cfg.get("peso_lexical", 0.0) or 0.0)
+
+    # --- Pré-filtragem de candidatos (A1/A2); A0 devolve a carteira inteira.
+    if estrategia and estrategia != ESTRATEGIA_SIMILARIDADE:
+        if setores_ativos is None:
+            setores_ativos = setores_por_ticker()
+    else:
+        setores_ativos = setores_ativos or {}
+
+    candidatos = aplicar_estrategia(
+        estrategia, list(carteira_usuario), noticia, setores_ativos
+    )
+    lexicais: set[str] = set()
+    if estrategia == ESTRATEGIA_SETOR_LEXICAL:
+        universo = set(carteira_usuario)
+        lexicais = {t for t in tickers_lexicais(noticia) if t in universo}
+
     store = get_asset_embedding_store(model_name=model_name, device=device)
 
     related: list[tuple[str, float]] = []
     start = time.time()
 
-    present, matrix = store.get_matrix(carteira_usuario)
+    present, matrix = store.get_matrix(candidatos)
     used_matrix = False
     if matrix is not None:
         try:
@@ -86,7 +121,7 @@ def relacionar_tickers(
             )
 
     if not used_matrix:
-        embeddings = store.get_embeddings(carteira_usuario)
+        embeddings = store.get_embeddings(candidatos)
         if not embeddings:
             log_event(
                 "ERROR",
@@ -96,9 +131,9 @@ def relacionar_tickers(
                 None,
                 "TICKER_WITHOUT_EMBEDDING",
                 None,
-                {"n_tickers": len(carteira_usuario)},
+                {"n_tickers": len(candidatos)},
             )
-        for ticker in carteira_usuario:
+        for ticker in candidatos:
             emb_asset = embeddings.get(ticker)
             if emb_asset is None:
                 continue
@@ -119,8 +154,25 @@ def relacionar_tickers(
             if score > threshold:
                 related.append((ticker, float(score)))
 
-    related.sort(key=lambda item: item[1], reverse=True)
+    # --- Guarda lexical (A2): tickers citados são mantidos e priorizados.
+    if lexicais:
+        presentes = {ticker for ticker, _ in related}
+        for ticker in lexicais:
+            if ticker not in presentes and ticker in candidatos:
+                related.append((ticker, 0.0))
+
+    related.sort(
+        key=lambda item: item[1]
+        + (peso_lexical if item[0] in lexicais else 0.0),
+        reverse=True,
+    )
     tickers = [ticker for ticker, _ in related]
+
+    if top_k:
+        try:
+            tickers = tickers[: int(top_k)]
+        except (TypeError, ValueError):
+            pass
 
     elapsed_ms = (time.time() - start) * 1000.0
     if not tickers:

@@ -11,6 +11,10 @@ class Ativo(models.Model):
 	# Texto usado para gerar o embedding do ativo na Fase 2. Se vazio,
 	# o pipeline usa "ticker nome". Permite enriquecer setor/palavras-chave.
 	descricao_embedding = models.TextField(blank=True, default="")
+	# Setor econômico (taxonomia em core/intelligent_motor/setores.py).
+	# Usado para restringir candidatos na Fase 2 (gating por setor) e para
+	# avaliar a setorização. Vazio = "Outros" (tratado como curinga).
+	setor = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
 	class Meta:
 		ordering = ["ticker"]

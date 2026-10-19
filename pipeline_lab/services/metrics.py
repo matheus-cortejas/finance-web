@@ -45,18 +45,56 @@ def binary_metrics(pairs: Iterable[tuple[bool, bool]]) -> dict:
     }
 
 
+def pair_metrics_sets(pairs: Iterable[tuple[set, set]]) -> dict:
+    """Métricas por par (ticker) a partir de conjuntos previsto x verdadeiro."""
+    tp = fp = fn = 0
+    itens = 0
+    exatos = 0
+    for previsto, verdadeiro in pairs:
+        itens += 1
+        tp += len(previsto & verdadeiro)
+        fp += len(previsto - verdadeiro)
+        fn += len(verdadeiro - previsto)
+        if previsto == verdadeiro:
+            exatos += 1
+    precision = _safe_div(tp, tp + fp)
+    recall = _safe_div(tp, tp + fn)
+    f1 = _safe_div(2 * precision * recall, precision + recall)
+    return {
+        "itens": itens,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "exatos": exatos,
+        "acuracia_conjunto": round(_safe_div(exatos, itens), 4),
+    }
+
+
+def label_target_fase1(label) -> bool | None:
+    """Alvo da Fase 1: relevância financeira; cai para `relevancia` (legado)."""
+    if label.relevancia_financeira is not None:
+        return bool(label.relevancia_financeira)
+    if label.relevancia is not None:
+        return bool(label.relevancia)
+    return None
+
+
 def _labeled_items(run: ExperimentRun):
-    items = list(
-        run.classifications.select_related("noticia__label").all()
-    )
+    items = list(run.classifications.select_related("noticia__label").all())
     labeled = []
     for item in items:
         try:
             label = item.noticia.label
         except Exception:
             label = None
-        if label is not None and label.relevancia is not None:
-            labeled.append((item, label))
+        if label is None:
+            continue
+        if label.relevancia is None and label.relevancia_financeira is None:
+            continue
+        labeled.append((item, label))
     return items, labeled
 
 
@@ -64,11 +102,12 @@ def _sweep(
     labeled,
     getter: Callable,
     thresholds: list[float],
+    target: Callable = lambda label: bool(label.relevancia),
 ) -> dict:
     rows = [
-        (getter(item), bool(label.relevancia))
+        (getter(item), bool(target(label)))
         for item, label in labeled
-        if getter(item) is not None
+        if getter(item) is not None and target(label) is not None
     ]
     if not rows:
         return {"thresholds": [], "best": None}
@@ -92,14 +131,25 @@ def compute_run_metrics(run: ExperimentRun) -> dict:
     items, labeled = _labeled_items(run)
 
     fase1_pairs = [
-        (bool(item.fase1_aprovada), bool(label.relevancia))
+        (bool(item.fase1_aprovada), label_target_fase1(label))
         for item, label in labeled
         if item.fase1_aprovada is not None
+        and label_target_fase1(label) is not None
     ]
     fase4_pairs = [
         (item.relevancia_binaria == 1, bool(label.relevancia))
         for item, label in labeled
-        if item.relevancia_binaria is not None
+        if item.relevancia_binaria is not None and label.relevancia is not None
+    ]
+
+    fase2_pairs = [
+        (
+            set(item.tickers_relacionados or []),
+            set(label.tickers_corretos or [])
+            | set(label.tickers_faltantes or []),
+        )
+        for item, label in labeled
+        if label.tickers_anotados
     ]
 
     score_sweep = _sweep(
@@ -111,6 +161,12 @@ def compute_run_metrics(run: ExperimentRun) -> dict:
         labeled,
         lambda item: item.relevancia_global,
         [round(x / 20.0, 2) for x in range(0, 21)],
+    )
+    fase1_sweep = _sweep(
+        labeled,
+        lambda item: item.relevancia_global,
+        [round(x / 20.0, 2) for x in range(0, 21)],
+        target=label_target_fase1,
     )
 
     distribuicoes = {}
@@ -141,11 +197,16 @@ def compute_run_metrics(run: ExperimentRun) -> dict:
             "metricas": binary_metrics(fase1_pairs),
             "avaliadas": len(fase1_pairs),
         },
+        "fase2": {
+            "metricas": pair_metrics_sets(fase2_pairs),
+            "avaliadas": len(fase2_pairs),
+        },
         "fase4": {
             "metricas": binary_metrics(fase4_pairs),
             "avaliadas": len(fase4_pairs),
         },
         "score_heuristico": score_sweep,
         "relevancia_global": relevancia_sweep,
+        "fase1_sweep": fase1_sweep,
         "distribuicoes": distribuicoes,
     }

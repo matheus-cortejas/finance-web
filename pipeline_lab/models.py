@@ -133,15 +133,38 @@ class AssetEmbedding(models.Model):
 
 
 class NewsLabel(models.Model):
-    """Gabarito manual usado para calcular precisão/recall."""
+    """Gabarito manual usado para calcular precisão/recall.
+
+    Cobre todas as fases avaliadas no TCC em um único registro por notícia:
+
+    * ``relevancia_financeira`` -> alvo da **Fase 1** (notícia é do mercado
+      financeiro?). Se vazio, cai para ``relevancia`` (compatibilidade).
+    * ``relevancia`` -> alvo da **Fase 4** (notícia é relevante/acionável?).
+    * ``setor`` / ``setor_secundario`` -> alvo da setorização.
+    * ``tickers_corretos`` / ``tickers_faltantes`` -> alvo da **Fase 2**
+      (avaliação por par notícia–ticker).
+    * ``sentimento`` / ``impacto`` / ``urgencia`` / ``categoria`` -> alvo da
+      **Fase 5**.
+    """
 
     noticia = models.OneToOneField(
         Noticia, on_delete=models.CASCADE, related_name="label"
     )
     relevancia = models.BooleanField(null=True, blank=True)
+    relevancia_financeira = models.BooleanField(null=True, blank=True)
     sentimento = models.CharField(max_length=16, blank=True, default="")
     impacto = models.CharField(max_length=16, blank=True, default="")
     categoria = models.CharField(max_length=64, blank=True, default="")
+    setor = models.CharField(max_length=64, blank=True, default="")
+    setor_secundario = models.CharField(max_length=64, blank=True, default="")
+    urgencia = models.CharField(max_length=16, blank=True, default="")
+    tickers_corretos = models.JSONField(default=list, blank=True)
+    tickers_faltantes = models.JSONField(default=list, blank=True)
+    # True quando o anotador revisou a lista de candidatos da Fase 2 (mesmo
+    # que não haja nenhum ticker correto). Sem isso não dá para distinguir
+    # "não anotado" de "anotado: nenhum correto".
+    tickers_anotados = models.BooleanField(null=True, blank=True)
+    confianca = models.PositiveSmallIntegerField(null=True, blank=True)
     observacao = models.TextField(blank=True, default="")
     anotador = models.CharField(max_length=150, blank=True, default="")
     anotado_em = models.DateTimeField(auto_now=True)

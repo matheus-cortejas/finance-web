@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import csv
+import re
 from pathlib import Path
 
 from django.core.management.base import BaseCommand, CommandError
 
 from core.models import Noticia
 from pipeline_lab.models import NewsLabel
+
+# Sentinela usada na coluna de tickers para indicar "anotei, nenhum correto".
+_NENHUM = {"nenhum", "nenhuma", "-", "n/a", "na", "vazio", "sem"}
+
+_LIST_SPLIT = re.compile(r"[|;,]+")
 
 
 def parse_bool(value) -> bool | None:
@@ -20,6 +26,58 @@ def parse_bool(value) -> bool | None:
     if text in {"0", "false", "nao", "não", "n", "no", "irrelevante"}:
         return False
     return None
+
+
+def parse_list(value) -> list[str]:
+    if value is None:
+        return []
+    text = str(value).strip()
+    if not text or text.lower() in _NENHUM:
+        return []
+    itens = []
+    for parte in _LIST_SPLIT.split(text):
+        item = parte.strip().upper()
+        if item and item not in itens and item.lower() not in _NENHUM:
+            itens.append(item)
+    return itens
+
+
+def _tickers_cell_revisada(value) -> bool:
+    """True se a célula foi preenchida (inclusive 'NENHUM')."""
+    if value is None:
+        return False
+    return bool(str(value).strip())
+
+
+def parse_urgencia(value) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip().lower()
+    if not text:
+        return ""
+    if text in {"alta", "media", "média", "baixa", "indefinida"}:
+        return "media" if text == "média" else text
+    try:
+        numero = float(text)
+    except ValueError:
+        return text[:16]
+    if numero >= 7:
+        return "alta"
+    if numero >= 4:
+        return "media"
+    return "baixa"
+
+
+def parse_int(value) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None
 
 
 class Command(BaseCommand):
@@ -58,18 +116,55 @@ class Command(BaseCommand):
                     continue
 
                 defaults = {}
-                relevancia = parse_bool(row.get("relevancia"))
+
+                # Fase 4 (compatível com a coluna antiga `relevancia`).
+                relevancia = parse_bool(
+                    row.get("rel_alerta", row.get("relevancia"))
+                )
                 if relevancia is not None:
                     defaults["relevancia"] = relevancia
+
+                # Fase 1.
+                rel_fin = parse_bool(
+                    row.get("rel_financeira", row.get("relevancia_financeira"))
+                )
+                if rel_fin is not None:
+                    defaults["relevancia_financeira"] = rel_fin
 
                 for field, max_len in (
                     ("sentimento", 16),
                     ("impacto", 16),
                     ("categoria", 64),
+                    ("setor", 64),
+                    ("setor_secundario", 64),
                 ):
-                    value = (row.get(field) or "").strip().lower()
+                    value = (row.get(field) or "").strip()
                     if value:
                         defaults[field] = value[:max_len]
+
+                urgencia = parse_urgencia(row.get("urgencia"))
+                if urgencia:
+                    defaults["urgencia"] = urgencia[:16]
+
+                confianca = parse_int(row.get("confianca"))
+                if confianca is not None:
+                    defaults["confianca"] = max(1, min(3, confianca))
+
+                if any(
+                    col in (reader.fieldnames or [])
+                    for col in ("tickers_corretos", "tickers_faltantes")
+                ):
+                    cell = row.get("tickers_corretos")
+                    revisada = _tickers_cell_revisada(cell)
+                    if revisada:
+                        defaults["tickers_corretos"] = parse_list(cell)
+                    faltantes = parse_list(row.get("tickers_faltantes"))
+                    if faltantes:
+                        defaults["tickers_faltantes"] = faltantes
+                    if revisada or _tickers_cell_revisada(
+                        row.get("tickers_faltantes")
+                    ):
+                        defaults["tickers_anotados"] = True
 
                 observacao = (row.get("observacao") or "").strip()
                 if observacao:

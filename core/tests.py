@@ -364,3 +364,326 @@ class PipelineLabWebTests(TestCase):
         self.assertEqual(response.status_code, 302)
         run.refresh_from_db()
         self.assertEqual(run.status, ExperimentRun.STATUS_CANCELLED)
+
+
+class SetoresTests(TestCase):
+    def test_classifica_ativos_conhecidos(self):
+        from core.intelligent_motor.setores import setor_do_ativo
+
+        self.assertEqual(
+            setor_do_ativo("PETR4", "Petrobras petróleo energia combustíveis"),
+            "Petróleo e Gás",
+        )
+        self.assertEqual(
+            setor_do_ativo("VALE3", "Vale mineração minério de ferro siderurgia"),
+            "Mineração e Siderurgia",
+        )
+        self.assertEqual(
+            setor_do_ativo("YDUQ3", "Yduqs educação ensino superior faculdades"),
+            "Educação",
+        )
+
+    def test_sem_palavra_chave_vai_para_outros(self):
+        from core.intelligent_motor.setores import setor_do_ativo
+
+        self.assertEqual(setor_do_ativo("XPTO", "descrição genérica"), "Outros")
+
+
+class SeedSetoresTests(TestCase):
+    def test_preenche_setor_pela_descricao(self):
+        Ativo.objects.create(
+            ticker="PETR4",
+            nome="Petrobras",
+            descricao_embedding="petroleo energia combustíveis offshore",
+        )
+        Ativo.objects.create(
+            ticker="ZZZZ",
+            nome="Empresa",
+            descricao_embedding="",
+        )
+        call_command("seed_setores", stdout=StringIO())
+        self.assertEqual(
+            Ativo.objects.get(ticker="PETR4").setor, "Petróleo e Gás"
+        )
+        self.assertEqual(Ativo.objects.get(ticker="ZZZZ").setor, "Outros")
+
+    def test_force_sobrescreve(self):
+        ativo = Ativo.objects.create(
+            ticker="ITUB4",
+            nome="Itaú Unibanco",
+            descricao_embedding="bancos crédito cartões investimentos",
+            setor="Errado",
+        )
+        call_command("seed_setores", stdout=StringIO())
+        ativo.refresh_from_db()
+        self.assertEqual(ativo.setor, "Errado")
+        call_command("seed_setores", "--force", stdout=StringIO())
+        ativo.refresh_from_db()
+        self.assertIn(ativo.setor, {"Bancos", "Serviços Financeiros"})
+
+
+class ImportLabelsTests(TestCase):
+    def test_importa_colunas_ampliadas(self):
+        noticia = make_noticia()
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels.csv"
+            path.write_text(
+                "noticia_id,rel_financeira,rel_alerta,setor,urgencia,"
+                "tickers_corretos,tickers_faltantes,confianca,sentimento\n"
+                f"{noticia.id},1,1,Petróleo e Gás,alta,petr4|PRIO3,VALE3,3,negativo\n",
+                encoding="utf-8",
+            )
+            call_command("import_labels", str(path), stdout=StringIO())
+
+        label = NewsLabel.objects.get(noticia=noticia)
+        self.assertTrue(label.relevancia)
+        self.assertTrue(label.relevancia_financeira)
+        self.assertEqual(label.setor, "Petróleo e Gás")
+        self.assertEqual(label.urgencia, "alta")
+        self.assertEqual(label.tickers_corretos, ["PETR4", "PRIO3"])
+        self.assertEqual(label.tickers_faltantes, ["VALE3"])
+        self.assertTrue(label.tickers_anotados)
+        self.assertEqual(label.confianca, 3)
+        self.assertEqual(label.sentimento, "negativo")
+
+    def test_tickers_nenhum_marca_anotado(self):
+        noticia = make_noticia()
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "labels.csv"
+            path.write_text(
+                "noticia_id,tickers_corretos\n"
+                f"{noticia.id},NENHUM\n",
+                encoding="utf-8",
+            )
+            call_command("import_labels", str(path), stdout=StringIO())
+
+        label = NewsLabel.objects.get(noticia=noticia)
+        self.assertEqual(label.tickers_corretos, [])
+        self.assertTrue(label.tickers_anotados)
+
+
+class BuildAnnotationSampleTests(TestCase):
+    def _run_com_classificacoes(self):
+        run = ExperimentRun.objects.create(
+            nome="amostra", modelo="modelo/fake", total_noticias=6
+        )
+        # 2 descartadas na Fase 1, 4 mantidas em faixas distintas.
+        casos = [
+            (False, 1, [], []),
+            (False, 0, [], []),
+            (True, 1, [], ["PRIO3"]),
+            (True, 4, ["PETR4"], ["BRKM5"]),
+            (True, 4, [], []),
+            (True, 9, ["VALE3"], []),
+        ]
+        for aprovada, score, encontrados, relacionados in casos:
+            n = make_noticia()
+            RunClassification.objects.create(
+                run=run,
+                noticia=n,
+                fase1_aprovada=aprovada,
+                score_heuristico=score,
+                tickers_encontrados=encontrados,
+                tickers_relacionados=relacionados,
+            )
+        return run
+
+    def test_gera_csv_com_candidatos_e_estratos(self):
+        run = self._run_com_classificacoes()
+        with TemporaryDirectory() as tmp:
+            call_command(
+                "build_annotation_sample",
+                "--run-id",
+                run.id,
+                "--output",
+                tmp,
+                "--name",
+                "am",
+                "--min-explicito",
+                "0",
+                stdout=StringIO(),
+            )
+            csv_path = Path(tmp) / "am" / "anotacao.csv"
+            self.assertTrue(csv_path.exists())
+            with csv_path.open(encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            self.assertEqual(len(rows), 6)
+            candidatos = {
+                r["noticia_id"]: set(r["candidatos"].split("|"))
+                for r in rows
+                if r["candidatos"]
+            }
+            self.assertIn("PETR4", {c for s in candidatos.values() for c in s})
+            # União de encontrados + relacionados.
+            self.assertIn(
+                {"BRKM5", "PETR4"},
+                candidatos.values(),
+            )
+            self.assertTrue((Path(tmp) / "am" / "LEIA-ME.txt").exists())
+            self.assertTrue((Path(tmp) / "am" / "diagnostico.csv").exists())
+
+
+class Fase2MetricsTests(TestCase):
+    def test_metricas_por_par(self):
+        n1 = make_noticia()
+        n2 = make_noticia()
+        run = ExperimentRun.objects.create(
+            nome="f2", modelo="modelo/fake", total_noticias=2
+        )
+        NewsLabel.objects.create(
+            noticia=n1,
+            relevancia=True,
+            tickers_anotados=True,
+            tickers_corretos=["PETR4"],
+            tickers_faltantes=["VALE3"],
+        )
+        NewsLabel.objects.create(
+            noticia=n2,
+            relevancia=True,
+            tickers_anotados=True,
+            tickers_corretos=[],
+        )
+        RunClassification.objects.create(
+            run=run,
+            noticia=n1,
+            relevancia_binaria=True,
+            tickers_relacionados=["PETR4", "BRKM5"],
+        )
+        RunClassification.objects.create(
+            run=run,
+            noticia=n2,
+            relevancia_binaria=True,
+            tickers_relacionados=["PRIO3"],
+        )
+
+        metrics = compute_run_metrics(run)
+        fase2 = metrics["fase2"]["metricas"]
+        # n1: tp=1 (PETR4), fp=1 (BRKM5), fn=1 (VALE3). n2: fp=1 (PRIO3).
+        self.assertEqual(fase2["tp"], 1)
+        self.assertEqual(fase2["fp"], 2)
+        self.assertEqual(fase2["fn"], 1)
+        self.assertEqual(metrics["fase2"]["avaliadas"], 2)
+
+
+class Fase2GatingTests(TestCase):
+    """Estratégias A1 (setor) e A2 (setor + lexical) da Fase 2."""
+
+    EMBS = {
+        "PETR4": [1.0, 0.0, 0.0],
+        "BRKM5": [0.8, 0.6, 0.0],
+        "VALE3": [0.6, 0.8, 0.0],
+        "DOW": [0.5, 0.866, 0.0],
+        "ITUB4": [1.0, 0.0, 0.0],
+    }
+    SETORES = {
+        "PETR4": "Petróleo e Gás",
+        "BRKM5": "Químicos e Petroquímica",
+        "VALE3": "Mineração e Siderurgia",
+        "DOW": "Químicos e Petroquímica",
+        "ITUB4": "Bancos",
+    }
+
+    def _run(self, fase2, texto, carteira, setores=None):
+        from core.intelligent_motor.fase2_tickers import pipeline
+
+        embeddings = {t: self.EMBS[t] for t in carteira}
+
+        class DummyStore:
+            def get_matrix(self, tickers):
+                return (None, None)
+
+            def get_embeddings(self, tickers):
+                return {t: embeddings[t] for t in tickers if t in embeddings}
+
+        noticia = {
+            "id": 1,
+            "titulo": texto,
+            "descricao": "",
+            "conteudo": "",
+            "embedding_noticia": [1.0, 0.0, 0.0],
+        }
+        with patch.object(
+            pipeline, "get_asset_embedding_store", return_value=DummyStore()
+        ):
+            return pipeline.relacionar_tickers(
+                noticia,
+                carteira,
+                config={"fase2": fase2},
+                setores_ativos=setores if setores is not None else {},
+            )
+
+    def test_a0_baseline_traz_vizinhos_espurios(self):
+        resultado = self._run(
+            {"threshold_similaridade": 0.35, "estrategia": "similaridade"},
+            "Petrobras anuncia resultados",
+            ["PETR4", "BRKM5", "VALE3", "DOW"],
+        )
+        self.assertIn("BRKM5", resultado)
+        self.assertIn("VALE3", resultado)
+        self.assertIn("DOW", resultado)
+
+    def test_a1_gating_por_setor_remove_espurios(self):
+        resultado = self._run(
+            {"threshold_similaridade": 0.35, "estrategia": "similaridade_setor"},
+            "Petrobras PETR4 amplia produção de petróleo",
+            ["PETR4", "BRKM5", "VALE3", "DOW"],
+            self.SETORES,
+        )
+        self.assertEqual(resultado, ["PETR4"])
+
+    def test_a1_sem_setor_detectado_cai_para_todos(self):
+        resultado = self._run(
+            {"threshold_similaridade": 0.35, "estrategia": "similaridade_setor"},
+            "Notícia genérica sobre o dia",
+            ["PETR4", "BRKM5", "VALE3", "DOW"],
+            self.SETORES,
+        )
+        self.assertEqual(len(resultado), 4)
+
+    def test_a2_forca_ticker_citado_fora_do_setor(self):
+        fase2 = {
+            "threshold_similaridade": 0.35,
+            "estrategia": "similaridade_setor_lexical",
+            "peso_lexical": 0.1,
+        }
+        texto = "Itaú ITUB4 eleva aposta e cita PETR4"
+        carteira = ["ITUB4", "PETR4", "BRKM5"]
+        a1 = self._run({**fase2, "estrategia": "similaridade_setor"}, texto, carteira, self.SETORES)
+        a2 = self._run(fase2, texto, carteira, self.SETORES)
+        self.assertNotIn("PETR4", a1)  # setor detectado (Bancos) excluiria PETR4
+        self.assertIn("PETR4", a2)  # ...mas o guarda lexical mantém
+
+    def test_top_k_limita_resultados(self):
+        resultado = self._run(
+            {
+                "threshold_similaridade": 0.35,
+                "estrategia": "similaridade",
+                "top_k": 2,
+            },
+            "Petrobras anuncia resultados",
+            ["PETR4", "BRKM5", "VALE3", "DOW"],
+        )
+        self.assertEqual(len(resultado), 2)
+        self.assertEqual(resultado[0], "PETR4")
+
+    def test_funcoes_puras_do_gating(self):
+        from core.intelligent_motor.fase2_tickers.gating import (
+            aplicar_estrategia,
+            filtrar_por_setor,
+            tickers_lexicais,
+        )
+
+        noticia = {"titulo": "Petrobras PETR4", "descricao": "", "conteudo": ""}
+        self.assertEqual(tickers_lexicais(noticia), ["PETR4"])
+        self.assertEqual(
+            filtrar_por_setor(
+                ["PETR4", "VALE3", "XPTO"],
+                {"PETR4": "Petróleo e Gás", "VALE3": "Mineração e Siderurgia"},
+                {"Petróleo e Gás"},
+            ),
+            ["PETR4", "XPTO"],  # XPTO sem setor = curinga
+        )
+        self.assertEqual(
+            aplicar_estrategia("similaridade", ["PETR4", "VALE3"], noticia, {}),
+            ["PETR4", "VALE3"],
+        )

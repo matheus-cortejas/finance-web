@@ -99,12 +99,14 @@ GPU habilitada). O build baixa vários GB.
 |---------|-----------|
 | `migrate` | Aplica migrações do Django. |
 | `bootstrap` | Carrega `core_ativos.json`, sincroniza `rss.txt` e coleta. `--skip-collect` só prepara. |
+| `seed_setores` | Preenche `Ativo.setor` (classificador por palavras-chave). `--from-json`/`--export`/`--force`. |
 | `run_collector` | Coleta contínua via `BlockingScheduler`. `--once`, `--interval`, `--within-days`, `--max-entries`. |
 | `sync_feeds` | Sincroniza `FonteRSS` a partir de `rss.txt`. |
 | `run_experiments` | Worker de execuções. `--once`, `--run-id`, `--poll-seconds`. |
 | `compute_metrics` | Recalcula métricas de uma execução. `--run-id N` ou `--all`. |
 | `generate_run_charts` | Gera gráficos/artefatos da execução em `exports/lab/run-<id>/`. `--run-id N`. |
-| `import_labels` | Importa labels anotados (CSV) para `NewsLabel`. |
+| `build_annotation_sample` | Gera `anotacao.csv` (todas as fases) + `diagnostico.csv` + `LEIA-ME.txt`, com candidatos da Fase 2 pré-preenchidos. `--run-id N`. |
+| `import_labels` | Importa labels anotados (CSV) para `NewsLabel`. `--dry-run`, `--anotador`. |
 | `export_dataset` | Exporta JSONL + `manifest.json` + `annotation_sample.csv`. |
 | `migrate_sqlite_to_postgres` | Migra o corpus do SQLite para o PostgreSQL preservando IDs. |
 
@@ -113,10 +115,53 @@ Exemplos:
 ```bash
 ./venv/bin/python manage.py run_collector --once --max-entries 5
 ./venv/bin/python manage.py run_experiments --once
+./venv/bin/python manage.py seed_setores --export exports/setores_ativos.json
 ./venv/bin/python manage.py export_dataset --output exports --sample-size 300 --run-id 3
-./venv/bin/python manage.py import_labels --csv exports/ds/annotation_sample.csv
+./venv/bin/python manage.py build_annotation_sample --run-id 3 --output exports/anotacao
+./venv/bin/python manage.py import_labels --csv exports/anotacao/anotacao/anotacao.csv
 ./venv/bin/python manage.py compute_metrics --run-id 3
 ```
+
+## Anotação e avaliação
+
+Uma única planilha cobre todas as fases — **uma linha por notícia**, anotada
+como `noticia_id` — para servir a qualquer execução futura sem retrabalho.
+
+```bash
+# 1) gera a amostra estratificada (Fase 1 descartadas + faixas de score) com
+#    os candidatos da Fase 2 pré-preenchidos (união regex ∪ similaridade)
+./venv/bin/python manage.py build_annotation_sample --run-id 3
+
+# 2) anote anotacao.csv (as listas de setor/categoria/etc. ficam em LEIA-ME.txt)
+# 3) importe
+./venv/bin/python manage.py import_labels --csv exports/anotacao/anotacao/anotacao.csv --dry-run
+./venv/bin/python manage.py import_labels --csv exports/anotacao/anotacao/anotacao.csv
+
+# 4) recalcule as métricas das fases
+./venv/bin/python manage.py compute_metrics --run-id 3
+```
+
+Colunas de `anotacao.csv` (vazias = não anotado; não entram na métrica):
+
+| Coluna | Alvo | Valores |
+|--------|------|---------|
+| `rel_financeira` | Fase 1 | `0`/`1` |
+| `rel_alerta` | Fase 4 | `0`/`1` |
+| `candidatos` | Fase 2 | pré-preenchido com a união de candidatos |
+| `tickers_corretos` | Fase 2 | subconjunto de `candidatos`, separado por `\|`; `NENHUM` se nenhum |
+| `tickers_faltantes` | Fase 2 | tickers que faltaram (recall) |
+| `setor` / `setor_secundario` | setorização | taxonomia em `core/intelligent_motor/setores.py` |
+| `sentimento` / `impacto` / `urgencia` / `categoria` | Fase 5 | ver `LEIA-ME.txt` |
+| `confianca` | — | `1` a `3` |
+
+Regra de `tickers_corretos`: marque **correto** só quando a notícia menciona a
+empresa ou a afeta diretamente (impacto material, não especulativo). "Mesmo
+setor" não basta.
+
+O campo `Ativo.setor` (preenchido por `seed_setores`) define a taxonomia de
+setores usada na amostra e, futuramente, no gating da Fase 2. O mapeamento
+gerado fica em `exports/` e pode ser revisado e reaplicado com
+`seed_setores --from-json exports/setores_ativos.json`.
 
 ## Laboratório (`/lab/`)
 
@@ -185,6 +230,10 @@ Cada execução do `export_dataset` cria uma pasta com:
 - `manifest.json` — filtros usados, contagens, tamanho e SHA-256 dos arquivos.
 - `annotation_sample.csv` — amostra para anotação manual. Por padrão prioriza
   notícias com conteúdo; use `--sample-all` para amostrar todas.
+
+> Para anotar **todas as fases** de uma vez (uma linha por notícia, com os
+> candidatos da Fase 2 já preenchidos), prefira
+> `build_annotation_sample --run-id N` — ver "Anotação e avaliação".
 - `--only-run` restringe a exportação (e a amostra de anotação) às notícias
   classificadas por uma execução. É o caminho recomendado para anotar e medir
   F1 de um run específico.

@@ -423,6 +423,12 @@ def gerar_resumo(
         linhas.append(
             f"  - Fase 2 θ_similaridade: {fase2.get('threshold_similaridade')}"
         )
+        if fase2.get("estrategia") and fase2.get("estrategia") != "similaridade":
+            linhas.append(
+                f"  - Fase 2 estratégia: {fase2.get('estrategia')} "
+                f"(top_k={fase2.get('top_k')}, "
+                f"peso_lexical={fase2.get('peso_lexical')})"
+            )
         linhas.append(
             f"  - Fase 4 cortes: rejeição ≤{rejeicao}, LLM {llm_min}–{llm_max}, "
             f"aprovação ≥{aprovacao}"

@@ -239,6 +239,28 @@ class RunParamsTests(TestCase):
         self.assertEqual(overrides["fase3"]["pesos"]["ticker_explicito"], 9)
         self.assertEqual(overrides["fase4"]["score_aprovacao_direta"], 8)
 
+    def test_build_overrides_fase2_estrategia_topk_peso(self):
+        from pipeline_lab.services.run_params import build_overrides
+
+        overrides = build_overrides(
+            {
+                "fase2_estrategia": "similaridade_setor_lexical",
+                "fase2_top_k": "10",
+                "fase2_peso_lexical": "0,2",
+            }
+        )
+        self.assertEqual(
+            overrides["fase2"]["estrategia"], "similaridade_setor_lexical"
+        )
+        self.assertEqual(overrides["fase2"]["top_k"], 10)
+        self.assertAlmostEqual(overrides["fase2"]["peso_lexical"], 0.2)
+
+    def test_validate_rejeita_estrategia_desconhecida(self):
+        from pipeline_lab.services.run_params import validate_overrides
+
+        with self.assertRaises(ValidationError):
+            validate_overrides({"fase2": {"estrategia": "inventada"}})
+
     def test_build_overrides_com_centroides(self):
         from pipeline_lab.services.run_params import build_overrides
 

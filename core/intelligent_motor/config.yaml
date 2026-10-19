@@ -17,6 +17,16 @@ fase1:
 fase2:
   threshold_similaridade: 0.35
 
+  # Estratégia de associação notícia -> ticker:
+  #   similaridade               = A0 (baseline do artigo, todos os ativos)
+  #   similaridade_setor         = A1 (gating: só o setor da notícia + curingas)
+  #   similaridade_setor_lexical = A2 (A1 + guarda lexical: tickers citados)
+  estrategia: similaridade
+  # Máximo de tickers por notícia (null = sem limite).
+  top_k: null
+  # Bônus de ordenação para tickers citados explicitamente no texto (A2).
+  peso_lexical: 0.0
+
   cache:
     backend: sqlite
 
